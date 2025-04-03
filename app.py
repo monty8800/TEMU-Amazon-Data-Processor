@@ -498,9 +498,18 @@ class DataProcessorApp:
                     # TODO: 实现调用亚马逊数据处理逻辑，并接收来源和输出目录参数
                     # merge_amazon_orders(source_dir, output_dir)
                     
-                    # 生成一些测试日志
-                    for i in range(5):
-                        logging.info(f"处理亚马逊数据文件 {i+1}")
+                    # 模拟处理亚马逊文件
+                    amazon_files = [
+                        "amazon/US-settlement-report-2025-03.csv",
+                        "amazon/JP-settlement-report-2025-03.csv",
+                        "amazon/UK-settlement-report-2025-03.csv",
+                        "amazon/DE-settlement-report-2025-03.csv",
+                        "amazon/CA-settlement-report-2025-03.csv"
+                    ]
+                    
+                    for file_name in amazon_files:
+                        file_path = source_dir / file_name
+                        logging.info(f"处理亚马逊数据文件: {file_path}")
                         time.sleep(0.2)  # 模拟处理时间
                     
                     logging.info("亚马逊数据处理完成")
@@ -532,13 +541,46 @@ class DataProcessorApp:
                     #     process_settlement=self.temu_settlement_var.get()
                     # )
                     
-                    # 生成一些测试日志
+                    # 模拟处理TEMU文件
+                    temu_files = {
+                        "订单数据": [
+                            "TEMU/temu-BUTIRESIN FACTORY/订单导出.xlsx",
+                            "TEMU/temu-GEEK CRAFT Limited/订单导出.xlsx",
+                            "TEMU/temu-YOBTOP FACTORY/订单导出.xlsx"
+                        ],
+                        "对账中心数据": [
+                            "TEMU/temu-BUTIRESIN FACTORY/对账中心.xlsx",
+                            "TEMU/temu-GEEK CRAFT Limited/对账中心.xlsx",
+                            "TEMU/temu-JINH FACTORY/对账中心.xlsx",
+                            "TEMU/temu-local YBT/对账中心.xlsx"
+                        ],
+                        "发货面单费数据": [
+                            "TEMU/temu-BUTIRESIN FACTORY/发货面单费.xlsx",
+                            "TEMU/temu-GEEK CRAFT Limited/发货面单费.xlsx",
+                            "TEMU/temu-JINH FACTORY/发货面单费.xlsx"
+                        ],
+                        "退货面单费数据": [
+                            "TEMU/temu-BUTIRESIN FACTORY/退至TEMU仓-退货面单费.xlsx",
+                            "TEMU/temu-GEEK CRAFT Limited/退至TEMU仓-退货面单费.xlsx",
+                            "TEMU/temu-BUTIRESIN FACTORY/退至商家仓-退货面单费.xlsx"
+                        ],
+                        "结算数据": [
+                            "TEMU/temu-BUTIRESIN FACTORY/美国/结算数据.xlsx",
+                            "TEMU/temu-BUTIRESIN FACTORY/日本/结算数据.xlsx",
+                            "TEMU/temu-GEEK CRAFT Limited/美国/结算数据.xlsx"
+                        ]
+                    }
+                    
                     for option in options:
                         logging.info(f"开始处理TEMU {option}...")
-                        for i in range(3):
-                            logging.info(f"  - 处理 {option} 文件 {i+1}")
-                            logging.debug(f"  - 详细信息: 已处理数据 {i*50} 条")
-                            time.sleep(0.2)  # 模拟处理时间
+                        if option in temu_files:
+                            for file_name in temu_files[option]:
+                                file_path = source_dir / file_name
+                                logging.info(f"  - 处理文件: {file_path}")
+                                # 模拟处理数据
+                                data_count = 50 + (hash(file_name) % 100)  # 使用文件名的哈希值生成随机数据量
+                                logging.debug(f"  - 详细信息: 已处理数据 {data_count} 条")
+                                time.sleep(0.2)  # 模拟处理时间
                         logging.info(f"TEMU {option}处理完成")
                         
                     logging.info("TEMU数据处理完成")
