@@ -5,6 +5,7 @@ import os
 import time
 import logging
 import pandas as pd
+import re
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
@@ -12,24 +13,56 @@ from enum import Enum
 import warnings
 import chardet
 
-def setup_logging():
-    """设置日志记录"""
+def setup_logging(task_dir=None):
+    """设置日志记录
+    
+    Args:
+        task_dir: 可选的任务目录，如果提供，日志也会输出到该目录
+    """
     # 创建日志目录
     log_dir = Path(__file__).parent / 'logs'
     log_dir.mkdir(exist_ok=True)
     
-    # 设置日志格式
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.StreamHandler(),  # 输出到控制台
-            logging.FileHandler(  # 输出到文件
-                log_dir / f'data_processing_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
-                encoding='utf-8'
-            )
-        ]
+    # 获取根日志器
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # 清除现有的处理器，以避免重复日志
+    if logger.handlers:
+        logger.handlers.clear()
+    
+    # 创建格式化器
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    
+    # 添加控制台处理器
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+    
+    # 添加主日志文件处理器
+    file_handler = logging.FileHandler(
+        log_dir / f'data_processing_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
+        encoding='utf-8'
     )
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    
+    # 如果提供了任务目录，添加任务日志文件处理器
+    if task_dir:
+        if not isinstance(task_dir, Path):
+            task_dir = Path(task_dir)
+            
+        # 确保任务目录存在
+        task_dir.mkdir(parents=True, exist_ok=True)
+        
+        task_log_file = task_dir / f'task_log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+        task_file_handler = logging.FileHandler(task_log_file, encoding='utf-8')
+        task_file_handler.setFormatter(formatter)
+        logger.addHandler(task_file_handler)
+        
+        logging.info(f'日志也将输出到任务目录: {task_dir}')
+    
+    logging.info('日志系统已初始化，开始处理数据...')
 
 # 导入所需模块
 
@@ -98,9 +131,148 @@ class TemuDataProcessor:
         self.task_id = str(int(time.time()))
         self.output_dir = Path(__file__).parent / '处理结果' / today_str / f'TASK_{self.task_id}'
         
+
+class CustomTemuDataProcessor(TemuDataProcessor):
+    """TEMU数据处理器，可使用定制的输出目录和任务ID"""
+    def __init__(self, source_dir=None, output_dir=None, task_id=None):
+        # 不调用父类的__init__，因为我们要自定义变量
+        # 确保日志配置已完成
+        if not logging.getLogger().handlers:
+            setup_logging()
+            
+        # 设置源数据目录
+        if source_dir:
+            self.source_dir = source_dir
+        else:
+            self.source_dir = Path(__file__).parent / '数据源'
+            
+        # 设置任务ID和输出目录
+        if task_id:
+            self.task_id = task_id
+        else:
+            self.task_id = str(int(time.time()))
+            
+        if output_dir:
+            self.output_dir = output_dir
+        else:
+            today_str = datetime.now().strftime('%Y%m%d')
+            self.output_dir = Path(__file__).parent / '处理结果' / today_str / f'TASK_{self.task_id}'
+        
         # 初始化目录
         self._init_directories()
         
+    def _extract_country_from_filename(self, file_path: Path) -> str:
+        """从文件名中提取国家信息
+        
+        Args:
+            file_path: 文件路径
+            
+        Returns:
+            提取到的国家名称，如果没有找到则返回空字符串
+        """
+        file_name = file_path.name
+        parent_dir = file_path.parent.name
+        full_path_str = str(file_path)
+        
+        # 常见国家名称映射
+        country_patterns = {
+            '美国': '美国',
+            'US': '美国',
+            '法国': '法国',
+            'FR': '法国',
+            '英国': '英国',
+            'UK': '英国',
+            '德国': '德国',
+            'DE': '德国',
+            '意大利': '意大利',
+            'IT': '意大利',
+            '西班牙': '西班牙',
+            'ES': '西班牙',
+            '日本': '日本',
+            'JP': '日本',
+            '加拿大': '加拿大',
+            'CA': '加拿大',
+            '澳大利亚': '澳大利亚',
+            'AU': '澳大利亚',
+            '荷兰': '荷兰',
+            'NL': '荷兰',
+            '中国': '中国',
+            'CN': '中国'
+        }
+        
+        # 下面是两个常见模式：
+        # 1. 订单导出-国家.csv
+        # 2. 订单导出-国家-其他信息.csv
+        match = re.search(r'订单导出-([^\.\-]+)', file_name)
+        if match:
+            country_key = match.group(1).strip()
+            logging.info(f'从文件名提取到国家关键字：{country_key}')
+            if country_key in country_patterns:
+                return country_patterns[country_key]
+        
+        # 尝试从目录名中提取
+        for country_key, country_value in country_patterns.items():
+            if country_key in parent_dir or country_key in full_path_str:
+                logging.info(f'从路径提取到国家关键字：{country_key}')
+                return country_value
+        
+        logging.warning(f'无法从文件路径提取国家信息：{file_path}')
+        return ''
+        
+    def _process_order_file(self, file_info: FileInfo) -> Optional[pd.DataFrame]:
+        """处理订单文件
+        
+        Args:
+            file_info: 文件信息
+            
+        Returns:
+            处理后的DataFrame，如果处理失败返回None
+        """
+        try:
+            # 提取国家信息
+            country = self._extract_country_from_filename(file_info.file_path)
+            
+            # 首先检查Excel文件是否有工作表
+            file_path_str = str(file_info.file_path)
+            if file_path_str.endswith('.xlsx'):
+                excel_file = pd.ExcelFile(file_info.file_path)
+                if len(excel_file.sheet_names) == 0:
+                    logging.warning(f'文件 {file_info.file_path} 没有工作表，跳过处理')
+                    return None
+
+
+            if file_path_str.endswith('.csv'):
+                # 尝试多种编码方式读取CSV文件
+                try:
+                    df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    try:
+                        # 如果UTF-8编码失败，尝试GBK编码
+                        df = pd.read_csv(file_info.file_path, encoding='gbk')
+                    except UnicodeDecodeError:
+                        try:
+                            # 尝试gb18030编码
+                            df = pd.read_csv(file_info.file_path, encoding='gb18030')
+                        except UnicodeDecodeError:
+                            # 最后尝试latin-1编码，它能处理任何8位字符
+                            logging.info(f'尝试使用latin-1编码读取文件: {file_info.file_path.name}')
+                            df = pd.read_csv(file_info.file_path, encoding='latin-1')
+            else:
+                df = pd.read_excel(file_info.file_path, engine='openpyxl')
+
+                
+            df.insert(0, column='店铺', value=file_info.store_name)
+            
+            # 添加国家信息到数据中(如果提取到了)
+            if country:
+                df.insert(1, column='国家', value=country)
+                logging.info(f'将国家信息 [{country}] 添加到订单数据中')
+            
+            logging.info(f'处理店铺订单：{file_info.store_name}, {len(df)} 条')
+            return df
+        except Exception as e:
+            logging.error(f'处理订单文件 {file_info.file_path} 失败: {str(e)}')
+            return None
     def _init_directories(self) -> None:
         """Initialize and validate directories"""
         if not self.source_dir.exists():
@@ -210,7 +382,7 @@ class TemuDataProcessor:
             
             for root, _, files in os.walk(self.source_dir):
                 for file in files:
-                    if file.endswith(('.xlsx', '.xls')) and not file.startswith('~$'):
+                    if file.endswith(('.xlsx', '.xls', '.csv')) and not file.startswith('~$'):
                         file_path = Path(root) / file
                         
                         # 如果文件路径包含退货面单费关键字
@@ -221,7 +393,7 @@ class TemuDataProcessor:
         else:
             for root, _, files in os.walk(self.source_dir):
                 for file in files:
-                    if file.endswith(('.xlsx', '.xls')) and not file.startswith('~$'):
+                    if file.endswith(('.xlsx', '.xls', '.csv')) and not file.startswith('~$'):
                         file_path = Path(root) / file
                         
                         # 如果文件路径包含指定类型的关键字
@@ -250,10 +422,26 @@ class TemuDataProcessor:
                     logging.warning(f'文件 {file_info.file_path} 没有工作表，跳过处理')
                     return None
 
+
             if file_path_str.endswith('.csv'):
-                df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                # 尝试多种编码方式读取CSV文件
+                try:
+                    df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    try:
+                        # 如果UTF-8编码失败，尝试GBK编码
+                        df = pd.read_csv(file_info.file_path, encoding='gbk')
+                    except UnicodeDecodeError:
+                        try:
+                            # 尝试gb18030编码
+                            df = pd.read_csv(file_info.file_path, encoding='gb18030')
+                        except UnicodeDecodeError:
+                            # 最后尝试latin-1编码，它能处理任何8位字符
+                            logging.info(f'尝试使用latin-1编码读取文件: {file_info.file_path.name}')
+                            df = pd.read_csv(file_info.file_path, encoding='latin-1')
             else:
                 df = pd.read_excel(file_info.file_path, engine='openpyxl')
+    
                 
             df.insert(0, column='店铺', value=file_info.store_name)
             logging.info(f'处理店铺数据：{file_info.store_name}, {len(df)} 条')
@@ -376,8 +564,7 @@ class TemuDataProcessor:
             all_dfs = temu_dfs + merchant_dfs + other_dfs
             if all_dfs:
                 merged_df = pd.concat(all_dfs, ignore_index=True)
-                timestamp = int(time.time())
-                output_path = self.output_dir / f'TEMU退货面单费-{timestamp}.xlsx'
+                output_path = self.output_dir / f'TEMU退货面单费-{self.task_id}.xlsx'
                 merged_df.to_excel(output_path, index=False)
                 logging.info(f'退货面单费数据合并完成，总数据量：{len(merged_df)}条')
                 logging.info(f'数据已保存至: {output_path}')
@@ -422,14 +609,17 @@ class TemuDataProcessor:
                         sheet_data_dict[sheet_name] = [df]
             
             # 合并并保存每个工作表的数据
-            timestamp = int(time.time())
+            all_merged_data = {}
             for sheet_name, dfs in sheet_data_dict.items():
                 if dfs:
                     merged_df = pd.concat(dfs, ignore_index=True)
-                    output_path = self.output_dir / f'TEMU结算数据-{sheet_name}-{timestamp}.xlsx'
-                    merged_df.to_excel(output_path, index=False)
+                    all_merged_data[sheet_name] = merged_df
                     logging.info(f'工作表 {sheet_name} 合并完成，总数据量：{len(merged_df)}条')
-                    logging.info(f'数据已保存至: {output_path}')
+                    
+            for sheet_name, merged_df in all_merged_data.items():
+                output_path = self.output_dir / f'TEMU结算数据-{sheet_name}-{self.task_id}.xlsx'
+                merged_df.to_excel(output_path, index=False)
+                logging.info(f'数据已保存至: {output_path}')
                     
         except Exception as e:
             logging.error(f'合并结算数据时发生错误: {str(e)}')
@@ -472,14 +662,59 @@ class TemuDataProcessor:
             按工作表分类的DataFrame字典
         """
         try:
-            excel_file = pd.ExcelFile(file_info.file_path)
+            file_path_str = str(file_info.file_path)
             sheet_data = {}
             
-            for sheet_name in excel_file.sheet_names:
-                df = pd.read_excel(excel_file, sheet_name=sheet_name)
-                df.insert(0, column='店铺', value=file_info.store_name)
-                sheet_data[sheet_name] = df
-                logging.info(f'处理店铺 {file_info.store_name} 工作表 {sheet_name}: {len(df)} 条')
+            # 提取国家信息
+            country = self._extract_country_from_filename(file_info.file_path)
+            
+            # 处理CSV文件
+            if file_path_str.endswith('.csv'):
+                try:
+                    # 尝试多种编码读取CSV文件
+                    try:
+                        df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                    except UnicodeDecodeError:
+                        try:
+                            df = pd.read_csv(file_info.file_path, encoding='gbk')
+                        except UnicodeDecodeError:
+                            try:
+                                df = pd.read_csv(file_info.file_path, encoding='gb18030')
+                            except UnicodeDecodeError:
+                                logging.info(f'尝试使用latin-1编码读取文件: {file_info.file_path.name}')
+                                df = pd.read_csv(file_info.file_path, encoding='latin-1')
+                    
+                    # 添加店铺信息
+                    df.insert(0, column='店铺', value=file_info.store_name)
+                    
+                    # 添加国家信息(如果有)
+                    if country:
+                        df.insert(1, column='国家', value=country)
+                        logging.info(f'将国家信息 [{country}] 添加到结算数据中')
+                    
+                    # 使用文件名作为工作表名
+                    sheet_name = '主表'
+                    sheet_data[sheet_name] = df
+                    logging.info(f'处理店铺 {file_info.store_name} CSV文件: {len(df)} 条')
+                    
+                except Exception as csv_e:
+                    logging.error(f'处理CSV结算数据文件 {file_info.file_path} 失败: {str(csv_e)}')
+            
+            # 处理Excel文件
+            else:
+                excel_file = pd.ExcelFile(file_info.file_path)
+                
+                for sheet_name in excel_file.sheet_names:
+                    df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                    df.insert(0, column='店铺', value=file_info.store_name)
+                    
+                    # 添加国家信息(如果有)
+                    if country:
+                        df.insert(1, column='国家', value=country)
+                        logging.info(f'将国家信息 [{country}] 添加到结算数据中')
+                    
+                    sheet_data[sheet_name] = df
+                    logging.info(f'处理店铺 {file_info.store_name} 工作表 {sheet_name}: {len(df)} 条')
                 
             return sheet_data
         except Exception as e:
@@ -523,12 +758,10 @@ class TemuDataProcessor:
             self.output_dir.mkdir(parents=True, exist_ok=True)
             
             # 合并并保存每个工作表的数据
-            timestamp = int(time.time())
-            
             for sheet_name, dfs in sheet_data.items():
                 if dfs:
                     merged_df = pd.concat(dfs, ignore_index=True)
-                    output_path = self.output_dir / f'TEMU对账中心-{sheet_name}-{timestamp}.xlsx'
+                    output_path = self.output_dir / f'TEMU对账中心-{sheet_name}-{self.task_id}.xlsx'
                     merged_df.to_excel(output_path, index=False)
                     logging.info(f'工作表 {sheet_name} 数据合并完成，共 {len(merged_df)} 条数据')
                     logging.info(f'数据已保存至: {output_path}')
@@ -557,10 +790,26 @@ class TemuDataProcessor:
                     logging.warning(f'文件 {file_info.file_path} 没有工作表，跳过处理')
                     return None
 
+
             if file_path_str.endswith('.csv'):
-                df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                # 尝试多种编码方式读取CSV文件
+                try:
+                    df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    try:
+                        # 如果UTF-8编码失败，尝试GBK编码
+                        df = pd.read_csv(file_info.file_path, encoding='gbk')
+                    except UnicodeDecodeError:
+                        try:
+                            # 尝试gb18030编码
+                            df = pd.read_csv(file_info.file_path, encoding='gb18030')
+                        except UnicodeDecodeError:
+                            # 最后尝试latin-1编码，它能处理任何8位字符
+                            logging.info(f'尝试使用latin-1编码读取文件: {file_info.file_path.name}')
+                            df = pd.read_csv(file_info.file_path, encoding='latin-1')
             else:
                 df = pd.read_excel(file_info.file_path, engine='openpyxl')
+    
                 
             df.insert(0, column='店铺', value=file_info.store_name)
             logging.info(f'处理店铺数据：{file_info.store_name}, {len(df)} 条')
@@ -587,10 +836,26 @@ class TemuDataProcessor:
                     logging.warning(f'文件 {file_info.file_path} 没有工作表，跳过处理')
                     return None
 
+
             if file_path_str.endswith('.csv'):
-                df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                # 尝试多种编码方式读取CSV文件
+                try:
+                    df = pd.read_csv(file_info.file_path, encoding='utf-8-sig')
+                except UnicodeDecodeError:
+                    try:
+                        # 如果UTF-8编码失败，尝试GBK编码
+                        df = pd.read_csv(file_info.file_path, encoding='gbk')
+                    except UnicodeDecodeError:
+                        try:
+                            # 尝试gb18030编码
+                            df = pd.read_csv(file_info.file_path, encoding='gb18030')
+                        except UnicodeDecodeError:
+                            # 最后尝试latin-1编码，它能处理任何8位字符
+                            logging.info(f'尝试使用latin-1编码读取文件: {file_info.file_path.name}')
+                            df = pd.read_csv(file_info.file_path, encoding='latin-1')
             else:
                 df = pd.read_excel(file_info.file_path, engine='openpyxl')
+    
                 
             df.insert(0, column='店铺', value=file_info.store_name)
             logging.info(f'处理店铺订单：{file_info.store_name}, {len(df)} 条')
@@ -625,8 +890,7 @@ class TemuDataProcessor:
             merged_df = pd.concat(all_dfs, ignore_index=True)
             
             # 保存结果
-            timestamp = int(time.time())
-            output_path = self.output_dir / f'TEMU订单数据-{timestamp}.xlsx'
+            output_path = self.output_dir / f'TEMU订单数据-{self.task_id}.xlsx'
             merged_df.to_excel(output_path, index=False)
             logging.info(f'订单数据合并完成，总数据量：{len(merged_df)}条')
             logging.info(f'数据已保存至: {output_path}')
@@ -674,7 +938,7 @@ def convert_to_numeric(value):
             return value
     return value
 
-def merge_amazon_orders(source_dir=None, output_dir=None):
+def merge_amazon_orders(source_dir=None, output_dir=None, task_id=None):
     """
     合并亚马逊所有店铺结算数据，从AMZ结算数据文件夹读取各个店铺的CSV文件并合并
     
@@ -741,12 +1005,41 @@ def merge_amazon_orders(source_dir=None, output_dir=None):
                     header_index = 6 if 'AE' in store_name else 7
                     
                     # 读取CSV文件
-                    df = pd.read_csv(
-                        csv_file,
-                        header=header_index,
-                        encoding='utf-8',
-                        on_bad_lines='skip'
-                    )
+                    try:
+                        # 先尝试UTF-8编码
+                        df = pd.read_csv(
+                            csv_file,
+                            header=header_index,
+                            encoding='utf-8-sig',
+                            on_bad_lines='skip'
+                        )
+                    except UnicodeDecodeError:
+                        try:
+                            # 如果UTF-8编码失败，尝试GBK编码
+                            df = pd.read_csv(
+                                csv_file,
+                                header=header_index,
+                                encoding='gbk',
+                                on_bad_lines='skip'
+                            )
+                        except UnicodeDecodeError:
+                            try:
+                                # 尝试gb18030编码
+                                df = pd.read_csv(
+                                    csv_file,
+                                    header=header_index,
+                                    encoding='gb18030',
+                                    on_bad_lines='skip'
+                                )
+                            except UnicodeDecodeError:
+                                # 最后尝试latin-1编码，它能处理任何8位字符
+                                logging.info(f'尝试使用latin-1编码读取文件: {csv_file.name}')
+                                df = pd.read_csv(
+                                    csv_file,
+                                    header=header_index,
+                                    encoding='latin-1',
+                                    on_bad_lines='skip'
+                                )
                     
                     if df.empty:
                         logging.warning(f'文件为空：{csv_file}')
@@ -802,9 +1095,13 @@ def merge_amazon_orders(source_dir=None, output_dir=None):
             folder_result = Path(__file__).parent / '处理结果' / time.strftime('%Y%m%d') / f'TASK_{timestamp}'
             folder_result.mkdir(parents=True, exist_ok=True)
             
-        # 生成输出文件名，使用当前时间戳作为文件名的一部分
-        file_timestamp = int(time.time())
-        output_path = folder_result / f'亚马逊结算数据汇总-{file_timestamp}.xlsx'
+        # 生成输出文件名，使用task_id作为文件名的一部分
+        # 如果没有提供task_id，则使用当前时间戳
+        if task_id:
+            file_id = task_id
+        else:
+            file_id = int(time.time())
+        output_path = folder_result / f'亚马逊结算数据汇总-{file_id}.xlsx'
         merged_df.to_excel(output_path, index=False)
         
         # 输出统计信息
@@ -861,13 +1158,33 @@ def process_data(choice: str):
         processor.process()
     elif choice == '3':
         print("合并所有数据...\n")
+        
+        # 创建共享的任务ID和输出目录
+        today_str = datetime.now().strftime('%Y%m%d')
+        task_id = str(int(time.time()))
+        output_dir = Path(__file__).parent / '处理结果' / today_str / f'TASK_{task_id}'
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 设置日志并输出初始信息
+        setup_logging(task_dir=output_dir)
+        logging.info(f'创建共享输出目录: {output_dir}')
+        
         # 先处理亚马逊数据
         print("先处理亚马逊结算数据...\n")
-        merge_amazon_orders()
+        logging.info('先处理亚马逊结算数据')
+        merge_amazon_orders(source_dir=None, output_dir=output_dir, task_id=task_id)
+        
         # 再处理TEMU数据
         print("\n再处理TEMU数据...\n")
-        processor = TemuDataProcessor()
+        logging.info('再处理TEMU数据')
+        # 创建CustomTemuDataProcessor实例，传入共享目录
+        processor = CustomTemuDataProcessor(source_dir=Path(__file__).parent / '数据源', 
+                                       output_dir=output_dir, 
+                                       task_id=task_id)
         processor.process()
+        
+        # 输出处理完成信息
+        logging.info(f'所有数据已保存至: {output_dir}')
     
     print("\n处理完成!")
 
