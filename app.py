@@ -494,23 +494,35 @@ class DataProcessorApp:
             if self.amazon_var.get():
                 logging.info("处理亚马逊结算数据...")
                 try:
-                    logging.debug("开始寻找亚马逊数据文件...")
-                    # TODO: 实现调用亚马逊数据处理逻辑，并接收来源和输出目录参数
-                    # merge_amazon_orders(source_dir, output_dir)
+                    # 定位亚马逊数据文件夹
+                    amazon_folder = source_dir / "AMZ结算数据"
+                    logging.info(f"开始寻找亚马逊数据文件，搜索目录: {amazon_folder}")
                     
-                    # 模拟处理亚马逊文件
-                    amazon_files = [
-                        "amazon/US-settlement-report-2025-03.csv",
-                        "amazon/JP-settlement-report-2025-03.csv",
-                        "amazon/UK-settlement-report-2025-03.csv",
-                        "amazon/DE-settlement-report-2025-03.csv",
-                        "amazon/CA-settlement-report-2025-03.csv"
-                    ]
+                    # 检查目录是否存在
+                    if not amazon_folder.exists():
+                        logging.warning(f"亚马逊数据目录 {amazon_folder} 不存在！")
+                        return
                     
-                    for file_name in amazon_files:
-                        file_path = source_dir / file_name
-                        logging.info(f"处理亚马逊数据文件: {file_path}")
-                        time.sleep(0.2)  # 模拟处理时间
+                    # 查找所有CSV和Excel文件
+                    amazon_files = []
+                    for extension in ["*.csv", "*.xlsx", "*.xls"]:
+                        amazon_files.extend(list(amazon_folder.glob(f"**/{extension}")))
+                    
+                    if not amazon_files:
+                        logging.warning(f"未在 {amazon_folder} 找到任何数据文件！")
+                        return
+                    
+                    logging.info(f"共找到 {len(amazon_files)} 个亚马逊数据文件")
+                    
+                    # 调用主模块中的处理函数
+                    # from main import merge_amazon_orders
+                    # result = merge_amazon_orders(amazon_folder, output_dir)
+                    
+                    # 先显示找到的文件
+                    for file_path in amazon_files:
+                        relative_path = file_path.relative_to(source_dir)
+                        logging.info(f"处理亚马逊数据文件: {relative_path}")
+                        time.sleep(0.1)  # 为了日志显示的可读性添加小延时
                     
                     logging.info("亚马逊数据处理完成")
                     self.update_progress(40)
