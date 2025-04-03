@@ -674,9 +674,13 @@ def convert_to_numeric(value):
             return value
     return value
 
-def merge_amazon_orders():
+def merge_amazon_orders(source_dir=None, output_dir=None):
     """
     合并亚马逊所有店铺结算数据，从AMZ结算数据文件夹读取各个店铺的CSV文件并合并
+    
+    Args:
+        source_dir: 源数据目录，默认为程序目录下的'数据源/AMZ结算数据'
+        output_dir: 输出目录，默认为程序目录下的'处理结果/当前日期/TASK_时间戳'
     """
     # 确保日志配置已完成
     if not logging.getLogger().handlers:
@@ -691,8 +695,12 @@ def merge_amazon_orders():
         col_names.extend(['store', 'country'])
         all_data = []
         
-        # 遍历AMZ结算数据文件夹
-        amz_data_path = Path(__file__).parent / '数据源' / 'AMZ结算数据'
+        # 确定源数据目录
+        if source_dir:
+            amz_data_path = Path(source_dir) / 'AMZ结算数据'
+        else:
+            amz_data_path = Path(__file__).parent / '数据源' / 'AMZ结算数据'
+            
         if not amz_data_path.exists():
             raise FileNotFoundError(f'AMZ结算数据文件夹不存在: {amz_data_path}')
             
@@ -785,11 +793,18 @@ def merge_amazon_orders():
             
         merged_df = pd.concat(all_data, ignore_index=True)
         
-        # 保存结果
-        timestamp = int(time.time())
-        folder_result = Path(__file__).parent / '处理结果' / time.strftime('%Y%m%d') / f'TASK_{timestamp}'
-        folder_result.mkdir(parents=True, exist_ok=True)
-        output_path = folder_result / f'亚马逊结算数据汇总-{timestamp}.xlsx'
+        # 确定输出目录
+        if output_dir:
+            folder_result = Path(output_dir)
+        else:
+            # 如果没有提供输出目录，使用默认路径
+            timestamp = int(time.time())
+            folder_result = Path(__file__).parent / '处理结果' / time.strftime('%Y%m%d') / f'TASK_{timestamp}'
+            folder_result.mkdir(parents=True, exist_ok=True)
+            
+        # 生成输出文件名，使用当前时间戳作为文件名的一部分
+        file_timestamp = int(time.time())
+        output_path = folder_result / f'亚马逊结算数据汇总-{file_timestamp}.xlsx'
         merged_df.to_excel(output_path, index=False)
         
         # 输出统计信息
