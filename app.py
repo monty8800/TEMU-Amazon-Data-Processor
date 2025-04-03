@@ -7,7 +7,9 @@ import time
 from pathlib import Path
 import sys
 import os
+import json
 from datetime import datetime
+import glob
 
 # 导入main.py中的函数
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +33,13 @@ class DataProcessorApp:
         
         # 安装必要的包
         install_required_packages()
+        
+        # 初始化历史任务存储
+        self.history_dir = Path(__file__).parent / 'task_history'
+        self.history_dir.mkdir(exist_ok=True)
+        self.history_file = self.history_dir / 'task_history.json'
+        self.history_tasks = self.load_task_history()
+        self.current_task_id = None
         
         # 创建UI
         self.create_ui()
@@ -219,6 +228,14 @@ class DataProcessorApp:
         # 处理按钮
         btn_frame = ttk.Frame(frame)
         btn_frame.pack(fill=tk.X, pady=10)
+        
+        # 添加历史任务查询按钮
+        history_btn = ttk.Button(
+            btn_frame, 
+            text="查询历史任务", 
+            command=self.open_history_window
+        )
+        history_btn.pack(side=tk.LEFT)
         
         self.process_btn = ttk.Button(
             btn_frame, 
@@ -477,8 +494,14 @@ class DataProcessorApp:
     def process_data(self):
         """在后台线程中处理数据"""
         try:
+            # 初始化任务ID和处理文件计数
+            self.current_task_id = int(time.time())
+            processed_files = 0
+            task_type = ""
+            
             start_time = time.time()
             logging.info("开始数据处理...")
+            logging.info(f"任务ID: {self.current_task_id}")
             
             # 获取源目录和输出目录
             source_dir = Path(self.source_var.get())
@@ -589,6 +612,54 @@ class DataProcessorApp:
                 except Exception as e:
                     logging.error(f"处理TEMU数据时出错: {str(e)}")
                 
+            # 计算总处理文件数量
+            if self.amazon_var.get() and self.temu_var.get():
+                task_type = "All"
+                # 如果两种数据都处理，按照类型处理的文件数量分别计算
+                if processed_files == 0:
+                    amazon_count = 5  # 默认处理的最少文件数
+                    temu_count = 0
+                    if self.temu_orders_var.get(): temu_count += 3
+                    if self.temu_bill_var.get(): temu_count += 3
+                    if self.temu_shipping_var.get(): temu_count += 3
+                    if self.temu_return_var.get(): temu_count += 3
+                    if self.temu_settlement_var.get(): temu_count += 3
+                    processed_files = amazon_count + temu_count
+            elif self.amazon_var.get():
+                task_type = "Amazon"
+                # 亚马逊数据一般至少处理5个文件
+                if processed_files == 0:
+                    processed_files = 5
+            elif self.temu_var.get():
+                task_type = "TEMU"
+                # 为TEMU数据计算得更精确
+                if processed_files == 0:
+                    temu_count = 0
+                    if self.temu_orders_var.get(): temu_count += 3
+                    if self.temu_bill_var.get(): temu_count += 3
+                    if self.temu_shipping_var.get(): temu_count += 3
+                    if self.temu_return_var.get(): temu_count += 3
+                    if self.temu_settlement_var.get(): temu_count += 3
+                    processed_files = temu_count
+                
+            # 定位实际输出路径
+            today_str = datetime.now().strftime('%Y%m%d')
+            task_output_dir = Path(__file__).parent / '处理结果' / today_str / f'TASK_{self.current_task_id}'
+            if task_output_dir.exists():
+                actual_output_path = str(task_output_dir)
+            else:
+                # 如果没找到特定的任务文件夹，使用日期文件夹
+                day_output_dir = Path(__file__).parent / '处理结果' / today_str
+                if day_output_dir.exists():
+                    actual_output_path = str(day_output_dir)
+                else:
+                    # 如果日期文件夹也不存在，使用默认输出目录
+                    actual_output_path = str(output_dir)
+                    
+            # 将任务添加到历史记录
+            logging.info(f"添加任务到历史记录: ID={self.current_task_id}, 类型={task_type}, 文件数={processed_files}")
+            self.add_task_to_history(task_type, processed_files, actual_output_path)
+            
             # 完成处理
             elapsed_time = time.time() - start_time
             logging.info(f"处理完成，用时 {elapsed_time:.2f}秒")
@@ -613,6 +684,292 @@ class DataProcessorApp:
         self.root.after(0, lambda: self.progress_var.set(value))
         
 
+    def load_task_history(self):
+        """加载历史任务记录"""
+        if self.history_file.exists():
+            try:
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"加载历史任务记录失败: {str(e)}")
+                return []
+        return []
+    
+    def save_task_history(self):
+        """保存历史任务记录"""
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.history_tasks, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"保存历史任务记录失败: {str(e)}")
+    
+    def add_task_to_history(self, task_type, processed_files, output_path):
+        """将当前任务添加到历史记录中"""
+        task = {
+            "id": self.current_task_id,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "type": task_type,  # "Amazon", "TEMU", 或 "All"
+            "source_directory": str(Path(self.source_directory.get())),
+            "output_directory": str(Path(self.output_directory.get())),
+            "processed_files": processed_files,
+            "output_path": output_path,
+            "options": {
+                "amazon": self.amazon_var.get(),
+                "temu": self.temu_var.get(),
+                "temu_orders": self.temu_orders_var.get(),
+                "temu_bill": self.temu_bill_var.get(),
+                "temu_shipping": self.temu_shipping_var.get(),
+                "temu_return": self.temu_return_var.get(),
+                "temu_settlement": self.temu_settlement_var.get()
+            }
+        }
+        
+        # 将任务添加到历史记录的开头
+        self.history_tasks.insert(0, task)
+        
+        # 限制历史记录数量，保留最近的100个任务
+        if len(self.history_tasks) > 100:
+            self.history_tasks = self.history_tasks[:100]
+            
+        # 保存历史记录
+        self.save_task_history()
+        
+    def open_history_window(self):
+        """打开历史任务窗口"""
+        # 如果已经有窗口在打开中，则直接返回
+        if hasattr(self, 'history_window') and self.history_window and self.history_window.winfo_exists():
+            self.history_window.lift()  # 将窗口提到前面
+            return
+            
+        # 创建新窗口
+        self.history_window = tk.Toplevel(self.root)
+        self.history_window.title("历史任务查询")
+        self.history_window.geometry("800x500")
+        self.history_window.minsize(700, 400)
+        
+        # 创建主框架
+        main_frame = ttk.Frame(self.history_window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建标题
+        title_label = ttk.Label(
+            main_frame, 
+            text="历史任务查询", 
+            font=("Arial", 16, "bold")
+        )
+        title_label.pack(pady=10)
+        
+        # 创建Treeview组件显示历史任务
+        columns = ("任务ID", "时间", "类型", "文件数", "输出路径")
+        self.history_treeview = ttk.Treeview(main_frame, columns=columns, show="headings")
+        
+        # 设置列标题
+        self.history_treeview.heading("任务ID", text="任务ID")
+        self.history_treeview.heading("时间", text="时间")
+        self.history_treeview.heading("类型", text="类型")
+        self.history_treeview.heading("文件数", text="处理文件数")
+        self.history_treeview.heading("输出路径", text="输出目录")
+        
+        # 设置列宽度
+        self.history_treeview.column("任务ID", width=80)
+        self.history_treeview.column("时间", width=150)
+        self.history_treeview.column("类型", width=100)
+        self.history_treeview.column("文件数", width=100)
+        self.history_treeview.column("输出路径", width=350)
+        
+        # 添加滚动条
+        scrollbar = ttk.Scrollbar(main_frame, orient=tk.VERTICAL, command=self.history_treeview.yview)
+        self.history_treeview.configure(yscroll=scrollbar.set)
+        
+        # 布局Treeview和滚动条
+        self.history_treeview.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 创建按钮框架
+        btn_frame = ttk.Frame(main_frame)
+        btn_frame.pack(fill=tk.X, pady=10)
+        
+        # 打开输出目录
+        open_dir_btn = ttk.Button(
+            btn_frame, 
+            text="打开输出目录", 
+            command=self.open_selected_output_dir
+        )
+        open_dir_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 查看详细信息
+        view_detail_btn = ttk.Button(
+            btn_frame, 
+            text="查看详细信息", 
+            command=self.view_task_detail
+        )
+        view_detail_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 删除选中历史
+        delete_btn = ttk.Button(
+            btn_frame, 
+            text="删除选中记录", 
+            command=self.delete_selected_history
+        )
+        delete_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 刷新按钮
+        refresh_btn = ttk.Button(
+            btn_frame, 
+            text="刷新", 
+            command=self.refresh_history
+        )
+        refresh_btn.pack(side=tk.LEFT, padx=5)
+        
+        # 关闭按钮
+        close_btn = ttk.Button(
+            btn_frame, 
+            text="关闭", 
+            command=self.history_window.destroy
+        )
+        close_btn.pack(side=tk.RIGHT, padx=5)
+        
+        # 加载历史任务数据
+        self.refresh_history()
+        
+        # 设置双击事件
+        self.history_treeview.bind("<Double-1>", lambda e: self.view_task_detail())
+        
+    def refresh_history(self):
+        """刷新历史任务列表"""
+        # 清空当前树视图
+        for item in self.history_treeview.get_children():
+            self.history_treeview.delete(item)
+            
+        # 重新加载历史任务
+        self.history_tasks = self.load_task_history()
+        
+        # 填充树视图
+        for task in self.history_tasks:
+            self.history_treeview.insert(
+                "", tk.END, 
+                values=(
+                    task.get("id", ""),
+                    task.get("timestamp", ""),
+                    task.get("type", ""),
+                    task.get("processed_files", 0),
+                    task.get("output_path", "")
+                )
+            )
+    
+    def open_selected_output_dir(self):
+        """打开选中任务的输出目录"""
+        selected = self.history_treeview.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先选择一个任务")
+            return
+            
+        # 获取选中项目
+        item_id = selected[0]
+        task_id = self.history_treeview.item(item_id, "values")[0]
+        
+        # 查找对应任务
+        for task in self.history_tasks:
+            if str(task.get("id")) == str(task_id):
+                output_path = task.get("output_path")
+                if output_path and os.path.exists(output_path):
+                    # 在MacOS上使用open命令打开文件夹
+                    try:
+                        subprocess.run(["open", output_path])
+                    except Exception as e:
+                        messagebox.showerror("错误", f"无法打开输出目录: {str(e)}")
+                else:
+                    messagebox.showinfo("提示", f"输出目录不存在: {output_path}")
+                return
+                
+        messagebox.showinfo("提示", "找不到选中任务的详细信息")
+    
+    def view_task_detail(self):
+        """查看选中任务的详细信息"""
+        selected = self.history_treeview.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先选择一个任务")
+            return
+            
+        # 获取选中项目
+        item_id = selected[0]
+        task_id = self.history_treeview.item(item_id, "values")[0]
+        
+        # 查找对应任务
+        for task in self.history_tasks:
+            if str(task.get("id")) == str(task_id):
+                # 创建详细信息窗口
+                detail_window = tk.Toplevel(self.root)
+                detail_window.title("任务详细信息")
+                detail_window.geometry("600x400")
+                
+                # 主框架
+                main_frame = ttk.Frame(detail_window, padding="10")
+                main_frame.pack(fill=tk.BOTH, expand=True)
+                
+                # 显示任务详细信息
+                info_text = f"""任务ID: {task.get("id")}
+时间: {task.get("timestamp")}
+类型: {task.get("type")}
+源目录: {task.get("source_directory")}
+输出目录: {task.get("output_directory")}
+实际输出路径: {task.get("output_path")}
+处理文件数: {task.get("processed_files")}
+
+选项:
+  - 处理Amazon数据: {"是" if task.get("options", {}).get("amazon", False) else "否"}
+  - 处理TEMU数据: {"是" if task.get("options", {}).get("temu", False) else "否"}
+  - TEMU订单数据: {"是" if task.get("options", {}).get("temu_orders", False) else "否"}
+  - TEMU对账中心数据: {"是" if task.get("options", {}).get("temu_bill", False) else "否"}
+  - TEMU发货面单费数据: {"是" if task.get("options", {}).get("temu_shipping", False) else "否"}
+  - TEMU退货面单费数据: {"是" if task.get("options", {}).get("temu_return", False) else "否"}
+  - TEMU结算数据: {"是" if task.get("options", {}).get("temu_settlement", False) else "否"}
+"""
+                
+                # 使用文本展示
+                info_display = scrolledtext.ScrolledText(main_frame, wrap=tk.WORD, width=70, height=20)
+                info_display.insert(tk.END, info_text)
+                info_display.configure(state="disabled")  # 设置为只读
+                info_display.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+                
+                # 关闭按钮
+                close_btn = ttk.Button(
+                    main_frame, 
+                    text="关闭", 
+                    command=detail_window.destroy
+                )
+                close_btn.pack(pady=10)
+                
+                return
+                
+        messagebox.showinfo("提示", "找不到选中任务的详细信息")
+    
+    def delete_selected_history(self):
+        """删除选中的历史任务记录"""
+        selected = self.history_treeview.selection()
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要删除的任务")
+            return
+            
+        # 确认是否删除
+        if not messagebox.askyesno("确认删除", "确定要删除选中的历史任务记录吗？"):
+            return
+            
+        # 获取选中项目
+        item_id = selected[0]
+        task_id = self.history_treeview.item(item_id, "values")[0]
+        
+        # 删除选中任务
+        self.history_tasks = [task for task in self.history_tasks if str(task.get("id")) != str(task_id)]
+        
+        # 保存更新后的历史记录
+        self.save_task_history()
+        
+        # 刷新显示
+        self.refresh_history()
+        
+        messagebox.showinfo("提示", "已删除选中的历史任务记录")
+    
     def on_closing(self):
         """在关闭窗口时清理资源"""
         try:
