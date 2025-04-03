@@ -1,12 +1,17 @@
 import tkinter as tk
-from tkinter import ttk, messagebox, filedialog
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 import threading
-import os
 import logging
-import time
 import queue
+import time
 from pathlib import Path
+import sys
+import os
 from datetime import datetime
+
+# 导入main.py中的函数
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from main import merge_amazon_orders, TemuDataProcessor, FileType
 from logging.handlers import QueueHandler, QueueListener
 
 # 导入主要的数据处理功能
@@ -494,35 +499,20 @@ class DataProcessorApp:
             if self.amazon_var.get():
                 logging.info("处理亚马逊结算数据...")
                 try:
-                    # 定位亚马逊数据文件夹
-                    amazon_folder = source_dir / "AMZ结算数据"
-                    logging.info(f"开始寻找亚马逊数据文件，搜索目录: {amazon_folder}")
+                    # 调用主模块中的亚马逊数据处理函数
+                    # 修改工作目录以确保正确找到数据源目录
+                    original_dir = os.getcwd()
+                    os.chdir(os.path.dirname(os.path.abspath(__file__)))
                     
-                    # 检查目录是否存在
-                    if not amazon_folder.exists():
-                        logging.warning(f"亚马逊数据目录 {amazon_folder} 不存在！")
-                        return
+                    # 设置进度更新
+                    self.update_progress(10)
                     
-                    # 查找所有CSV和Excel文件
-                    amazon_files = []
-                    for extension in ["*.csv", "*.xlsx", "*.xls"]:
-                        amazon_files.extend(list(amazon_folder.glob(f"**/{extension}")))
+                    # 直接调用main.py中的实际处理函数
+                    logging.info("调用亚马逊数据处理函数...")
+                    merge_amazon_orders()
                     
-                    if not amazon_files:
-                        logging.warning(f"未在 {amazon_folder} 找到任何数据文件！")
-                        return
-                    
-                    logging.info(f"共找到 {len(amazon_files)} 个亚马逊数据文件")
-                    
-                    # 调用主模块中的处理函数
-                    # from main import merge_amazon_orders
-                    # result = merge_amazon_orders(amazon_folder, output_dir)
-                    
-                    # 先显示找到的文件
-                    for file_path in amazon_files:
-                        relative_path = file_path.relative_to(source_dir)
-                        logging.info(f"处理亚马逊数据文件: {relative_path}")
-                        time.sleep(0.1)  # 为了日志显示的可读性添加小延时
+                    # 恢复原始工作目录
+                    os.chdir(original_dir)
                     
                     logging.info("亚马逊数据处理完成")
                     self.update_progress(40)
@@ -533,13 +523,23 @@ class DataProcessorApp:
             if self.temu_var.get():
                 logging.info("处理TEMU数据...")
                 try:
-                    # 定位TEMU数据文件夹
-                    temu_folder = source_dir / "TEMU"
-                    logging.info(f"开始寻找TEMU数据文件，搜索目录: {temu_folder}")
+                    # 修改工作目录以确保正确找到数据源目录
+                    original_dir = os.getcwd()
+                    os.chdir(os.path.dirname(os.path.abspath(__file__)))
                     
-                    # 检查目录是否存在
-                    if not temu_folder.exists():
-                        logging.warning(f"TEMU数据目录 {temu_folder} 不存在！")
+                    # 创建TemuDataProcessor实例
+                    logging.info("创建TEMU数据处理器...")
+                    processor = TemuDataProcessor()
+                    
+                    # 设置进度更新
+                    self.update_progress(40)
+                    
+                    # 根据用户选择的选项处理数据
+                    # 如果用户没有选择任何数据类型，提前返回
+                    if not (self.temu_orders_var.get() or self.temu_bill_var.get() or 
+                           self.temu_shipping_var.get() or self.temu_return_var.get() or 
+                           self.temu_settlement_var.get()):
+                        logging.warning("未选择任何TEMU数据类型进行处理")
                         return
                     
                     # 记录选择的几项选项
@@ -550,82 +550,39 @@ class DataProcessorApp:
                     if self.temu_return_var.get(): options.append("退货面单费数据")
                     if self.temu_settlement_var.get(): options.append("结算数据")
                     
-                    if not options:
-                        logging.warning("未选择任何TEMU数据类型进行处理")
-                        return
-                        
                     logging.info(f"选择处理的TEMU数据类型: {', '.join(options)}")
                     
-                    # 获取店铺列表
-                    shop_folders = [f for f in temu_folder.iterdir() if f.is_dir()]
-                    if not shop_folders:
-                        logging.warning(f"在 {temu_folder} 目录下未找到任何店铺文件夹")
-                        return
-                        
-                    shop_names = [folder.name for folder in shop_folders]
-                    logging.info(f"找到 {len(shop_names)} 个店铺: {', '.join(shop_names)}")
+                    # 根据选择分别处理数据
+                    if self.temu_orders_var.get():
+                        logging.info("处理TEMU订单数据...")
+                        processor.merge_orders()
+                        self.update_progress(50)
                     
-                    # 定义文件类型到文件名的映射
-                    file_type_patterns = {
-                        "订单数据": "*订单*",
-                        "对账中心数据": "*对账中心*",
-                        "发货面单费数据": "*发货面单费*",
-                        "退货面单费数据": ["*退至TEMU仓*", "*退至商家仓*", "*退货面单费*"],
-                        "结算数据": "*结算数据*"
-                    }
+                    if self.temu_bill_var.get():
+                        logging.info("处理TEMU对账中心数据...")
+                        processor.merge_bill_data()
+                        self.update_progress(60)
                     
-                    # 分门别类处理各类数据
-                    processed_files = 0
-                    for option in options:
-                        logging.info(f"开始处理TEMU {option}...")
-                        
-                        option_files = []
-                        patterns = file_type_patterns.get(option, [])
-                        if not isinstance(patterns, list):
-                            patterns = [patterns]
-                            
-                        # 在每个店铺文件夹中查找符合要求的文件
-                        for shop_folder in shop_folders:
-                            for pattern in patterns:
-                                # 强化搜索，扫描所有子目录
-                                for file_path in shop_folder.glob(f"**/{pattern}.xlsx"):
-                                    option_files.append(file_path)
-                                for file_path in shop_folder.glob(f"**/{pattern}.xls"):
-                                    option_files.append(file_path)
-                                for file_path in shop_folder.glob(f"**/{pattern}.csv"):
-                                    option_files.append(file_path)
-                                    
-                        if not option_files:
-                            logging.warning(f"没有找到 {option} 相关的文件")
-                            continue
-                            
-                        logging.info(f"找到 {len(option_files)} 个 {option} 相关文件")
-                        
-                        # 处理每个文件
-                        for file_path in option_files:
-                            relative_path = file_path.relative_to(source_dir)
-                            logging.info(f"  - 处理文件: {relative_path}")
-                            # TODO: 这里将来将调用真实的处理逻辑
-                            #try:
-                            #    # 根据文件类型调用不同的处理方法
-                            #    if option == "订单数据":
-                            #        # 处理订单数据
-                            #    elif option == "对账中心数据":
-                            #        # 处理对账中心数据
-                            #    else:
-                            #        # 处理其他类型数据
-                            #except Exception as e:
-                            #    logging.error(f"  - 处理文件 {relative_path} 失败: {str(e)}")
-                            
-                            # 模拟处理数据数量
-                            data_count = 50 + (hash(str(file_path)) % 100)
-                            logging.debug(f"  - 详细信息: 文件 {file_path.name} 中已处理数据 {data_count} 条")
-                            processed_files += 1
-                            time.sleep(0.1)  # 小延时便于观察
-                            
-                        logging.info(f"TEMU {option} 处理完成")
+                    if self.temu_shipping_var.get():
+                        logging.info("处理TEMU发货面单费数据...")
+                        processor.merge_shipping_fees()
+                        self.update_progress(70)
                     
-                    logging.info(f"TEMU数据处理完成，共处理了 {processed_files} 个文件")
+                    if self.temu_return_var.get():
+                        logging.info("处理TEMU退货面单费数据...")
+                        processor.merge_return_fees()
+                        self.update_progress(80)
+                    
+                    if self.temu_settlement_var.get():
+                        logging.info("处理TEMU结算数据...")
+                        processor.merge_settlement_data()
+                        self.update_progress(90)
+                    
+                    # 输出处理结果路径
+                    logging.info(f"所有TEMU数据已保存至: {processor.output_dir}")
+                    
+                    # 恢复原始工作目录
+                    os.chdir(original_dir)
                         
                     logging.info("TEMU数据处理完成")
                     self.update_progress(90)
