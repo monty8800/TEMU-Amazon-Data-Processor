@@ -1,19 +1,57 @@
-import json
+import sys
 import subprocess
-import shutil
+import importlib.util
+import json
 import os
 import time
 import logging
-import pandas as pd
 import re
-import colorama
-from colorama import Fore, Style
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import warnings
-import chardet
+
+# 检查并安装必要的依赖包
+def check_and_install_dependencies():
+    """检查并安装必要的依赖包"""
+    required_packages = {
+        'pandas': 'pandas>=1.5.0',
+        'openpyxl': 'openpyxl>=3.0.10', 
+        'chardet': 'chardet>=4.0.0',
+        'colorama': 'colorama>=0.4.4'
+    }
+    
+    missing_packages = []
+    
+    for package, version_spec in required_packages.items():
+        if importlib.util.find_spec(package) is None:
+            missing_packages.append(version_spec)
+    
+    if missing_packages:
+        print(f"\n正在安装缺失的依赖包: {', '.join(missing_packages)}")
+        try:
+            subprocess.check_call([sys.executable, '-m', 'pip', 'install', *missing_packages])
+            print("所有依赖包安装成功\n")
+            
+            # 重新导入初始化之前可能缺失的模块
+            for package in required_packages.keys():
+                if package in missing_packages:
+                    globals()[package] = importlib.import_module(package)
+        except Exception as e:
+            print(f"安装依赖包时出错: {str(e)}")
+            print("请手动安装所需的包: {', '.join(missing_packages)}")
+            sys.exit(1)
+    
+    # 现在导入必要的模块
+    global pd, chardet, colorama, Fore, Style
+    import pandas as pd
+    import chardet
+    import colorama
+    from colorama import Fore, Style
+
+# 在脚本开始时检查依赖包
+check_and_install_dependencies()
 
 # 初始化colorama
 colorama.init(autoreset=True)
