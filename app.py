@@ -4,8 +4,10 @@ import threading
 import os
 import logging
 import time
+import queue
 from pathlib import Path
 from datetime import datetime
+from logging.handlers import QueueHandler, QueueListener
 
 # 导入主要的数据处理功能
 from main import TemuDataProcessor, merge_amazon_orders, setup_logging, install_required_packages
@@ -28,6 +30,9 @@ class DataProcessorApp:
         # 创建UI
         self.create_ui()
         
+        # 在销毁时停止日志监听器
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
     def setup_logging(self):
         """设置日志记录"""
         log_dir = Path(__file__).parent / 'logs'
@@ -35,6 +40,11 @@ class DataProcessorApp:
         
         # 设置日志格式
         self.log_file = log_dir / f'app_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
+        
+        # 创建一个自定义的日志处理器，将日志输出到GUI
+        self.log_text_handler = None  # 初始化为None，程序初始化时将设置
+        
+        # 设置日志
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -244,21 +254,6 @@ class DataProcessorApp:
         )
         browse_country_btn.pack(side=tk.RIGHT)
         
-        # 亚马逊列名映射文件
-        amazon_frame = ttk.LabelFrame(frame, text="亚马逊列名映射文件", padding="10")
-        amazon_frame.pack(fill=tk.X, pady=5)
-        
-        self.amazon_file_var = tk.StringVar(value=str(Path(__file__).parent / 'amazon_columns.json'))
-        amazon_entry = ttk.Entry(amazon_frame, textvariable=self.amazon_file_var, width=50)
-        amazon_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
-        
-        browse_amazon_btn = ttk.Button(
-            amazon_frame, 
-            text="浏览...", 
-            command=lambda: self.browse_file(self.amazon_file_var, [("JSON文件", "*.json")])
-        )
-        browse_amazon_btn.pack(side=tk.RIGHT)
-        
         # 保存配置按钮
         save_btn = ttk.Button(
             frame, 
@@ -284,6 +279,9 @@ class DataProcessorApp:
         # 设置只读
         self.log_text.config(state=tk.DISABLED)
         
+        # 添加自定义日志处理器
+        self.setup_log_queue_handler()
+        
         # 底部按钮
         btn_frame = ttk.Frame(self.log_tab, padding=5)
         btn_frame.pack(fill=tk.X)
@@ -295,8 +293,18 @@ class DataProcessorApp:
         )
         refresh_btn.pack(side=tk.RIGHT)
         
+        clear_btn = ttk.Button(
+            btn_frame, 
+            text="清空控制台", 
+            command=self.clear_log
+        )
+        clear_btn.pack(side=tk.RIGHT, padx=5)
+        
         # 初始加载日志
         self.refresh_log()
+        
+        # 定时检查日志队列
+        self.check_log_queue()
         
     def setup_about_tab(self):
         """设置关于选项卡"""
@@ -369,6 +377,58 @@ class DataProcessorApp:
         """保存配置"""
         messagebox.showinfo("保存配置", "配置已保存")
         
+    def setup_log_queue_handler(self):
+        """设置日志队列处理器"""
+        # 创建一个队列来存储日志消息
+        self.log_queue = queue.Queue()
+        
+        # 创建一个自定义的日志处理器
+        class TextHandler(logging.Handler):
+            def __init__(self, text_widget):
+                super().__init__()
+                self.text_widget = text_widget
+                
+            def emit(self, record):
+                msg = self.format(record)
+                # 使用after方法在主线程中更新UI
+                self.text_widget.after(0, self.text_widget.append_log, msg)
+        
+        # 为Text控件添加一个方法来追加日志
+        def append_log(widget, msg):
+            widget.config(state=tk.NORMAL)
+            widget.insert(tk.END, msg + '\n')
+            widget.config(state=tk.DISABLED)
+            widget.see(tk.END)  # 滚动到底部
+            
+        # 将方法添加到Text控件
+        self.log_text.append_log = append_log.__get__(self.log_text, tk.Text)
+        
+        # 创建处理器
+        self.text_handler = TextHandler(self.log_text)
+        self.text_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        
+        # 创建队列处理器
+        queue_handler = QueueHandler(self.log_queue)
+        
+        # 创建队列监听器
+        self.log_listener = QueueListener(
+            self.log_queue, 
+            self.text_handler,
+            respect_handler_level=True
+        )
+        
+        # 添加队列处理器到日志系统
+        root_logger = logging.getLogger()
+        root_logger.addHandler(queue_handler)
+        
+        # 启动监听器
+        self.log_listener.start()
+    
+    def check_log_queue(self):
+        """定时检查日志队列"""
+        # 每500毫秒检查一次
+        self.root.after(500, self.check_log_queue)
+        
     def refresh_log(self):
         """刷新日志内容"""
         if hasattr(self, 'log_file') and self.log_file.exists():
@@ -385,6 +445,12 @@ class DataProcessorApp:
                 self.log_text.see(tk.END)
             except Exception as e:
                 messagebox.showerror("错误", f"读取日志文件时出错: {str(e)}")
+                
+    def clear_log(self):
+        """清空日志控制台"""
+        self.log_text.config(state=tk.NORMAL)
+        self.log_text.delete(1.0, tk.END)
+        self.log_text.config(state=tk.DISABLED)
                 
     def start_processing(self):
         """开始数据处理"""
@@ -417,29 +483,68 @@ class DataProcessorApp:
             source_dir.mkdir(parents=True, exist_ok=True)
             output_dir.mkdir(parents=True, exist_ok=True)
             
+            # 记录目录信息
+            logging.info(f"数据源目录: {source_dir}")
+            logging.info(f"输出目录: {output_dir}")
+            
             # 更新进度
             self.update_progress(10)
             
             # 处理亚马逊数据
             if self.amazon_var.get():
                 logging.info("处理亚马逊结算数据...")
-                # TODO: 实现调用亚马逊数据处理逻辑，并接收来源和输出目录参数
-                # merge_amazon_orders(source_dir, output_dir)
-                self.update_progress(40)
+                try:
+                    logging.debug("开始寻找亚马逊数据文件...")
+                    # TODO: 实现调用亚马逊数据处理逻辑，并接收来源和输出目录参数
+                    # merge_amazon_orders(source_dir, output_dir)
+                    
+                    # 生成一些测试日志
+                    for i in range(5):
+                        logging.info(f"处理亚马逊数据文件 {i+1}")
+                        time.sleep(0.2)  # 模拟处理时间
+                    
+                    logging.info("亚马逊数据处理完成")
+                    self.update_progress(40)
+                except Exception as e:
+                    logging.error(f"处理亚马逊数据时出错: {str(e)}")
                 
             # 处理TEMU数据
             if self.temu_var.get():
                 logging.info("处理TEMU数据...")
-                # TODO: 实现调用TEMU数据处理逻辑，并接收来源和输出目录参数
-                # temu_processor = TemuDataProcessor(source_dir, output_dir)
-                # temu_processor.process(
-                #     process_orders=self.temu_orders_var.get(),
-                #     process_bill=self.temu_bill_var.get(),
-                #     process_shipping=self.temu_shipping_var.get(),
-                #     process_return=self.temu_return_var.get(),
-                #     process_settlement=self.temu_settlement_var.get()
-                # )
-                self.update_progress(90)
+                try:
+                    # 记录选择的几项选项
+                    options = []
+                    if self.temu_orders_var.get(): options.append("订单数据")
+                    if self.temu_bill_var.get(): options.append("对账中心数据")
+                    if self.temu_shipping_var.get(): options.append("发货面单费数据")
+                    if self.temu_return_var.get(): options.append("退货面单费数据")
+                    if self.temu_settlement_var.get(): options.append("结算数据")
+                    
+                    logging.info(f"选择处理的TEMU数据类型: {', '.join(options)}")
+                    
+                    # TODO: 实现调用TEMU数据处理逻辑，并接收来源和输出目录参数
+                    # temu_processor = TemuDataProcessor(source_dir, output_dir)
+                    # temu_processor.process(
+                    #     process_orders=self.temu_orders_var.get(),
+                    #     process_bill=self.temu_bill_var.get(),
+                    #     process_shipping=self.temu_shipping_var.get(),
+                    #     process_return=self.temu_return_var.get(),
+                    #     process_settlement=self.temu_settlement_var.get()
+                    # )
+                    
+                    # 生成一些测试日志
+                    for option in options:
+                        logging.info(f"开始处理TEMU {option}...")
+                        for i in range(3):
+                            logging.info(f"  - 处理 {option} 文件 {i+1}")
+                            logging.debug(f"  - 详细信息: 已处理数据 {i*50} 条")
+                            time.sleep(0.2)  # 模拟处理时间
+                        logging.info(f"TEMU {option}处理完成")
+                        
+                    logging.info("TEMU数据处理完成")
+                    self.update_progress(90)
+                except Exception as e:
+                    logging.error(f"处理TEMU数据时出错: {str(e)}")
                 
             # 完成处理
             elapsed_time = time.time() - start_time
@@ -465,6 +570,15 @@ class DataProcessorApp:
         self.root.after(0, lambda: self.progress_var.set(value))
         
 
+    def on_closing(self):
+        """在关闭窗口时清理资源"""
+        try:
+            # 停止日志监听器
+            if hasattr(self, 'log_listener'):
+                self.log_listener.stop()
+        finally:
+            self.root.destroy()
+
 if __name__ == "__main__":
     # 设置UI风格
     try:
@@ -473,6 +587,9 @@ if __name__ == "__main__":
         sv_ttk.set_theme("light")
     except ImportError:
         pass  # 如果sv_ttk不可用，使用默认风格
+    
+    # 设置日志级别，显示详细日志
+    logging.getLogger().setLevel(logging.DEBUG)
     
     root = tk.Tk()
     app = DataProcessorApp(root)
