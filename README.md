@@ -1,9 +1,12 @@
 # TEMU & Amazon 数据处理系统
 
-[![Version](https://img.shields.io/badge/版本-v1.2.1-blue)](https://github.com/monty8800/TEMU-Amazon-Data-Processor/releases/tag/v1.2.1)
+[![Version](https://img.shields.io/badge/版本-v1.2.2-blue)](https://github.com/monty8800/TEMU-Amazon-Data-Processor/releases/tag/v1.2.2)
 [![Python](https://img.shields.io/badge/Python-3.8%2B-brightgreen)](https://www.python.org/)
+[![PyPI](https://img.shields.io/pypi/v/temu-amazon-processor)](https://pypi.org/project/temu-amazon-processor/)
 
 这是一个用于处理和合并TEMU和亚马逊销售数据的工具，能够自动处理多种类型的数据文件并生成统一格式的结果。支持多种文件格式和编码，自动提取国家信息，并提供彩色日志输出。
+
+现在可以通过PyPI直接安装使用！
 
 ## 主要功能
 
@@ -47,11 +50,47 @@
 - `处理结果/`: 存放处理结果的目录（不包含在此仓库中）
 - `logs/`: 日志文件目录
 
+## 安装方法
+
+### 从 PyPI 安装
+
+```bash
+pip install temu-amazon-processor
+```
+
+### 从源码安装
+
+```bash
+git clone https://github.com/monty8800/TEMU-Amazon-Data-Processor.git
+cd TEMU-Amazon-Data-Processor
+pip install -e .
+```
+
+## 使用方法
+
+### 命令行方式
+
+安装后，直接在命令行运行：
+
+```bash
+temu-processor
+```
+
+将启动交互式菜单，您可以选择处理TEMU数据、亚马逊数据或同时处理两者。
+
+### 作为Python模块导入
+
+```python
+from temu_amazon_processor import main
+main.main()
+```
+
 ## 依赖包
 
-- pandas
-- openpyxl
-- chardet
+- pandas>=1.5.0
+- openpyxl>=3.0.10
+- chardet>=4.0.0
+- colorama>=0.4.4
 
 ## 特殊功能
 
@@ -81,6 +120,12 @@
 - 确保数据源文件结构正确，参考使用方法部分
 
 ## 版本更新历史
+
+### v1.2.2 (2025-04-03)
+- 发布到PyPI：通过`pip install temu-amazon-processor`安装
+- 添加命令行入口点，安装后可直接运行`temu-processor`
+- 完善对Python全平台的支持
+- 增强依赖版本管理
 
 ### v1.2.1 (2025-04-03)
 - 文档完善：添加详细的版本更新历史
