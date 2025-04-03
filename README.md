@@ -45,3 +45,9 @@
 
 - 数据源目录和处理结果目录不包含在此仓库中，使用前需手动创建
 - 首次运行程序会自动安装所需依赖
+
+
+## git提交
+git remote add origin https://github.com/monty8800/TEMU-Amazon-Data-Processor.git
+git branch -M main
+git push -u origin main
