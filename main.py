@@ -6,12 +6,40 @@ import time
 import logging
 import pandas as pd
 import re
+import colorama
+from colorama import Fore, Style
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import warnings
 import chardet
+
+# 初始化colorama
+colorama.init(autoreset=True)
+
+# 日志辅助函数
+def log_section(message):
+    """输出一个高亮的区块标题"""
+    logging.info(Fore.CYAN + Style.BRIGHT + "=" * 80)
+    logging.info(Fore.CYAN + Style.BRIGHT + f" {message} ")
+    logging.info(Fore.CYAN + Style.BRIGHT + "=" * 80)
+
+def log_success(message):
+    """输出一个成功消息"""
+    logging.info(Fore.GREEN + Style.BRIGHT + f"✔ {message}")
+    
+def log_warning(message):
+    """输出一个警告消息"""
+    logging.warning(Fore.YELLOW + Style.BRIGHT + f"⚠ {message}")
+    
+def log_error(message):
+    """输出一个错误消息"""
+    logging.error(Fore.RED + Style.BRIGHT + f"✘ {message}")
+    
+def log_step(step_number, message):
+    """输出处理步骤"""
+    logging.info(Fore.BLUE + Style.BRIGHT + f"Step {step_number}: {message}")
 
 def setup_logging(task_dir=None):
     """设置日志记录
@@ -31,12 +59,30 @@ def setup_logging(task_dir=None):
     if logger.handlers:
         logger.handlers.clear()
     
-    # 创建格式化器
-    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    # 创建一个定制的格式化器类，添加颜色
+    class ColoredFormatter(logging.Formatter):
+        FORMATS = {
+            logging.DEBUG: Fore.CYAN + '%(asctime)s - ' + Fore.BLUE + '%(levelname)-8s' + Fore.RESET + ' - %(message)s',
+            logging.INFO: Fore.GREEN + '%(asctime)s - ' + Fore.BLUE + '%(levelname)-8s' + Fore.RESET + ' - %(message)s',
+            logging.WARNING: Fore.YELLOW + '%(asctime)s - ' + Fore.YELLOW + '%(levelname)-8s' + Fore.RESET + ' - %(message)s',
+            logging.ERROR: Fore.RED + '%(asctime)s - ' + Fore.RED + '%(levelname)-8s' + Fore.RESET + ' - %(message)s',
+            logging.CRITICAL: Fore.MAGENTA + '%(asctime)s - ' + Fore.MAGENTA + '%(levelname)-8s' + Fore.RESET + ' - %(message)s'
+        }
+
+        def format(self, record):
+            log_fmt = self.FORMATS.get(record.levelno)
+            formatter = logging.Formatter(log_fmt, datefmt='%Y-%m-%d %H:%M:%S')
+            return formatter.format(record)
+    
+    # 普通文件格式化器
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)-8s - %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    
+    # 控制台彩色格式化器
+    color_formatter = ColoredFormatter()
     
     # 添加控制台处理器
     console_handler = logging.StreamHandler()
-    console_handler.setFormatter(formatter)
+    console_handler.setFormatter(color_formatter)
     logger.addHandler(console_handler)
     
     # 添加主日志文件处理器
@@ -44,7 +90,7 @@ def setup_logging(task_dir=None):
         log_dir / f'data_processing_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log',
         encoding='utf-8'
     )
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
     
     # 如果提供了任务目录，添加任务日志文件处理器
@@ -55,14 +101,20 @@ def setup_logging(task_dir=None):
         # 确保任务目录存在
         task_dir.mkdir(parents=True, exist_ok=True)
         
+        # 创建任务日志文件
         task_log_file = task_dir / f'task_log_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'
-        task_file_handler = logging.FileHandler(task_log_file, encoding='utf-8')
-        task_file_handler.setFormatter(formatter)
-        logger.addHandler(task_file_handler)
+        task_handler = logging.FileHandler(task_log_file, encoding='utf-8')
+        task_handler.setFormatter(file_formatter)
+        logger.addHandler(task_handler)
         
         logging.info(f'日志也将输出到任务目录: {task_dir}')
+        
+    # 添加分隔线，增强日志可读性
+    logger.info("=" * 80)
+    logger.info(f'日志系统初始化完成 - [系统启动时间：{datetime.now().strftime("%Y-%m-%d %H:%M:%S")}]')
+    logger.info("=" * 80)
     
-    logging.info('日志系统已初始化，开始处理数据...')
+    log_success('日志系统已初始化，开始处理数据...')
 
 # 导入所需模块
 
@@ -284,42 +336,44 @@ class CustomTemuDataProcessor(TemuDataProcessor):
         
     def process(self):
         """处理所有TEMU数据"""
+        log_section('开始 TEMU 数据处理流程')
         start_time = time.time()
-        logging.info('开始处理TEMU数据')
         
         try:
             # 创建输出目录
             self.output_dir.mkdir(parents=True, exist_ok=True)
+            log_step(1, f'准备数据目录')
             logging.info(f'源数据目录: {self.source_dir}')
             logging.info(f'结果输出目录: {self.output_dir}')
             
             # 合并订单数据
-            logging.info('处理订单数据...')
+            log_step(2, '处理订单数据')
             self.merge_orders()
             
             # 合并对账中心数据
-            logging.info('处理对账中心数据...')
+            log_step(3, '处理对账中心数据')
             self.merge_bill_data()
             
             # 合并面单费用数据
-            logging.info('处理面单费用数据...')
+            log_step(4, '处理面单费用数据')
             self.merge_shipping_fees()
             
             # 合并退货面单费数据
-            logging.info('处理退货面单费数据...')
+            log_step(5, '处理退货面单费数据')
             self.merge_return_fees()
             
             # 合并结算数据
-            logging.info('处理结算数据...')
+            log_step(6, '处理结算数据')
             self.merge_settlement_data()
             
             # 输出处理统计
             elapsed_time = time.time() - start_time
-            logging.info(f'TEMU数据处理完成，用时: {elapsed_time:.2f}秒')
-            logging.info(f'所有数据已保存至: {self.output_dir}')
+            log_section('TEMU 数据处理完成')
+            log_success(f'总处理用时: {elapsed_time:.2f}秒')
+            log_success(f'所有数据已保存至: {self.output_dir}')
             
         except Exception as e:
-            logging.error(f'TEMU数据处理失败: {str(e)}')
+            log_error(f'TEMU数据处理失败: {str(e)}')
             raise
 
 
@@ -581,12 +635,12 @@ class CustomTemuDataProcessor(TemuDataProcessor):
             raise
         finally:
             elapsed_time = time.time() - start_time
-            logging.info(f'对账中心数据处理完成，用时 {elapsed_time:.2f}s')
+            log_success(f'TEMU结算数据处理完成，用时 {elapsed_time:.2f}s')
         
     def merge_settlement_data(self) -> None:
         """合并结算数据"""
         start_time = time.time()
-        logging.info('开始合并结算数据')
+        log_section('开始合并TEMU结算数据')
         
         try:
             files = self.find_files(FileType.SETTLEMENT)
@@ -608,25 +662,36 @@ class CustomTemuDataProcessor(TemuDataProcessor):
                     else:
                         sheet_data_dict[sheet_name] = [df]
             
-            # 合并并保存每个工作表的数据
-            all_merged_data = {}
-            for sheet_name, dfs in sheet_data_dict.items():
-                if dfs:
-                    merged_df = pd.concat(dfs, ignore_index=True)
-                    all_merged_data[sheet_name] = merged_df
-                    logging.info(f'工作表 {sheet_name} 合并完成，总数据量：{len(merged_df)}条')
+            # 将所有工作表保存到同一个Excel文件中
+            if sheet_data_dict:
+                output_path = self.output_dir / f'TEMU结算数据-{self.task_id}.xlsx'
+                log_step(1, f'创建多工作表Excel文件: {output_path}')
+                
+                # 创建ExcelWriter对象
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    # 遍历所有工作表，将数据写入各自的sheet
+                    sheet_count = 0
+                    total_rows = 0
                     
-            for sheet_name, merged_df in all_merged_data.items():
-                output_path = self.output_dir / f'TEMU结算数据-{sheet_name}-{self.task_id}.xlsx'
-                merged_df.to_excel(output_path, index=False)
-                logging.info(f'数据已保存至: {output_path}')
+                    for sheet_name, dfs in sheet_data_dict.items():
+                        if dfs:
+                            sheet_count += 1
+                            merged_df = pd.concat(dfs, ignore_index=True)
+                            row_count = len(merged_df)
+                            total_rows += row_count
+                            merged_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                            log_success(f'工作表 {sheet_name} 数据合并完成，共 {row_count} 条数据')
+                    
+                log_section('TEMU结算数据合并完成')
+                log_success(f'共处理 {sheet_count} 个工作表，总数据量 {total_rows} 条')
+                log_success(f'所有工作表数据已保存至: {output_path}')
                     
         except Exception as e:
             logging.error(f'合并结算数据时发生错误: {str(e)}')
             raise
         finally:
             elapsed_time = time.time() - start_time
-            logging.info(f'对账中心数据处理完成，用时 {elapsed_time:.2f}s')
+            log_success(f'TEMU结算数据处理完成，用时 {elapsed_time:.2f}s')
 
     def _process_bill_file(self, file_info: FileInfo) -> Dict[str, pd.DataFrame]:
         """处理对账中心文件
@@ -724,7 +789,7 @@ class CustomTemuDataProcessor(TemuDataProcessor):
     def merge_bill_data(self) -> None:
         """合并对账中心数据"""
         start_time = time.time()
-        logging.info('开始合并对账中心数据')
+        log_section('开始合并TEMU对账中心数据')
         
         try:
             # 查找对账中心文件
@@ -757,20 +822,34 @@ class CustomTemuDataProcessor(TemuDataProcessor):
             # 创建输出目录
             self.output_dir.mkdir(parents=True, exist_ok=True)
             
-            # 合并并保存每个工作表的数据
-            for sheet_name, dfs in sheet_data.items():
-                if dfs:
-                    merged_df = pd.concat(dfs, ignore_index=True)
-                    output_path = self.output_dir / f'TEMU对账中心-{sheet_name}-{self.task_id}.xlsx'
-                    merged_df.to_excel(output_path, index=False)
-                    logging.info(f'工作表 {sheet_name} 数据合并完成，共 {len(merged_df)} 条数据')
-                    logging.info(f'数据已保存至: {output_path}')
+            # 将所有工作表的数据保存到同一个Excel文件中，每个工作表保持原来的名称
+            if sheet_data:
+                output_path = self.output_dir / f'TEMU对账中心-{self.task_id}.xlsx'
+                log_step(1, f'创建多工作表Excel文件: {output_path}')
+                
+                # 创建ExcelWriter对象
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    # 遍历所有工作表，将数据写入各自的sheet
+                    sheet_count = 0
+                    total_rows = 0
+                    for sheet_name, dfs in sheet_data.items():
+                        if dfs:
+                            sheet_count += 1
+                            merged_df = pd.concat(dfs, ignore_index=True)
+                            row_count = len(merged_df)
+                            total_rows += row_count
+                            merged_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                            log_success(f'工作表 {sheet_name} 数据合并完成，共 {row_count} 条数据')
+                
+                log_section('对账中心数据合并完成')
+                log_success(f'共处理 {sheet_count} 个工作表，总数据量 {total_rows} 条')
+                log_success(f'所有工作表数据已保存至: {output_path}')
         except Exception as e:
             logging.error(f'合并对账中心数据时发生错误: {str(e)}')
             raise
         finally:
             elapsed_time = time.time() - start_time
-            logging.info(f'对账中心数据处理完成，用时 {elapsed_time:.2f}s')
+            log_success(f'TEMU结算数据处理完成，用时 {elapsed_time:.2f}s')
             
     def _process_excel_file(self, file_info: FileInfo) -> Optional[pd.DataFrame]:
         """处理Excel文件
@@ -950,8 +1029,11 @@ def merge_amazon_orders(source_dir=None, output_dir=None, task_id=None):
     if not logging.getLogger().handlers:
         setup_logging()
         
+    log_section('开始亚马逊结算数据处理')
     start_time = time.time()
-    logging.info('开始合并亚马逊结算数据')
+    store_count = 0
+    file_count = 0
+    total_rows = 0
     
     try:
         # 初始化数据框
@@ -978,7 +1060,7 @@ def merge_amazon_orders(source_dir=None, output_dir=None, task_id=None):
                 
             store_count += 1
             store_name = store_dir.name
-            logging.info(f'处理店铺：{store_name}')
+            log_step(store_count, f'处理店铺：{store_name}')
             
             # 确定店铺所属国家
             store_country = None
@@ -998,7 +1080,7 @@ def merge_amazon_orders(source_dir=None, output_dir=None, task_id=None):
             # 处理店铺下的所有CSV文件
             for csv_file in store_dir.glob('*.csv'):
                 file_count += 1
-                logging.info(f'处理文件：{csv_file.name}')
+                logging.info(f'处理文件 {file_count}: {csv_file.name}')
                 
                 try:
                     # 根据不同地区设置不同的header行数
@@ -1105,12 +1187,12 @@ def merge_amazon_orders(source_dir=None, output_dir=None, task_id=None):
         merged_df.to_excel(output_path, index=False)
         
         # 输出统计信息
-        logging.info('----------------------------------------')
-        logging.info(f'处理完成，用时：{time.time() - start_time:.2f}秒')
-        logging.info(f'处理店铺数：{store_count}')
-        logging.info(f'处理文件数：{file_count}')
-        logging.info(f'总数据量：{total_rows}条')
-        logging.info(f'数据已保存至：{output_path}')
+        log_section('亚马逊结算数据处理完成')
+        log_success(f'总处理用时：{time.time() - start_time:.2f}秒')
+        log_success(f'处理店铺数：{store_count}')
+        log_success(f'处理文件数：{file_count}')
+        log_success(f'总数据量：{total_rows}条')
+        log_success(f'数据已保存至：{output_path}')
         
         # 输出各店铺的数据统计
         store_stats = merged_df.groupby(['store', 'country']).size()
