@@ -533,6 +533,15 @@ class DataProcessorApp:
             if self.temu_var.get():
                 logging.info("处理TEMU数据...")
                 try:
+                    # 定位TEMU数据文件夹
+                    temu_folder = source_dir / "TEMU"
+                    logging.info(f"开始寻找TEMU数据文件，搜索目录: {temu_folder}")
+                    
+                    # 检查目录是否存在
+                    if not temu_folder.exists():
+                        logging.warning(f"TEMU数据目录 {temu_folder} 不存在！")
+                        return
+                    
                     # 记录选择的几项选项
                     options = []
                     if self.temu_orders_var.get(): options.append("订单数据")
@@ -541,59 +550,82 @@ class DataProcessorApp:
                     if self.temu_return_var.get(): options.append("退货面单费数据")
                     if self.temu_settlement_var.get(): options.append("结算数据")
                     
+                    if not options:
+                        logging.warning("未选择任何TEMU数据类型进行处理")
+                        return
+                        
                     logging.info(f"选择处理的TEMU数据类型: {', '.join(options)}")
                     
-                    # TODO: 实现调用TEMU数据处理逻辑，并接收来源和输出目录参数
-                    # temu_processor = TemuDataProcessor(source_dir, output_dir)
-                    # temu_processor.process(
-                    #     process_orders=self.temu_orders_var.get(),
-                    #     process_bill=self.temu_bill_var.get(),
-                    #     process_shipping=self.temu_shipping_var.get(),
-                    #     process_return=self.temu_return_var.get(),
-                    #     process_settlement=self.temu_settlement_var.get()
-                    # )
+                    # 获取店铺列表
+                    shop_folders = [f for f in temu_folder.iterdir() if f.is_dir()]
+                    if not shop_folders:
+                        logging.warning(f"在 {temu_folder} 目录下未找到任何店铺文件夹")
+                        return
+                        
+                    shop_names = [folder.name for folder in shop_folders]
+                    logging.info(f"找到 {len(shop_names)} 个店铺: {', '.join(shop_names)}")
                     
-                    # 模拟处理TEMU文件
-                    temu_files = {
-                        "订单数据": [
-                            "TEMU/temu-BUTIRESIN FACTORY/订单导出.xlsx",
-                            "TEMU/temu-GEEK CRAFT Limited/订单导出.xlsx",
-                            "TEMU/temu-YOBTOP FACTORY/订单导出.xlsx"
-                        ],
-                        "对账中心数据": [
-                            "TEMU/temu-BUTIRESIN FACTORY/对账中心.xlsx",
-                            "TEMU/temu-GEEK CRAFT Limited/对账中心.xlsx",
-                            "TEMU/temu-JINH FACTORY/对账中心.xlsx",
-                            "TEMU/temu-local YBT/对账中心.xlsx"
-                        ],
-                        "发货面单费数据": [
-                            "TEMU/temu-BUTIRESIN FACTORY/发货面单费.xlsx",
-                            "TEMU/temu-GEEK CRAFT Limited/发货面单费.xlsx",
-                            "TEMU/temu-JINH FACTORY/发货面单费.xlsx"
-                        ],
-                        "退货面单费数据": [
-                            "TEMU/temu-BUTIRESIN FACTORY/退至TEMU仓-退货面单费.xlsx",
-                            "TEMU/temu-GEEK CRAFT Limited/退至TEMU仓-退货面单费.xlsx",
-                            "TEMU/temu-BUTIRESIN FACTORY/退至商家仓-退货面单费.xlsx"
-                        ],
-                        "结算数据": [
-                            "TEMU/temu-BUTIRESIN FACTORY/美国/结算数据.xlsx",
-                            "TEMU/temu-BUTIRESIN FACTORY/日本/结算数据.xlsx",
-                            "TEMU/temu-GEEK CRAFT Limited/美国/结算数据.xlsx"
-                        ]
+                    # 定义文件类型到文件名的映射
+                    file_type_patterns = {
+                        "订单数据": "*订单*",
+                        "对账中心数据": "*对账中心*",
+                        "发货面单费数据": "*发货面单费*",
+                        "退货面单费数据": ["*退至TEMU仓*", "*退至商家仓*", "*退货面单费*"],
+                        "结算数据": "*结算数据*"
                     }
                     
+                    # 分门别类处理各类数据
+                    processed_files = 0
                     for option in options:
                         logging.info(f"开始处理TEMU {option}...")
-                        if option in temu_files:
-                            for file_name in temu_files[option]:
-                                file_path = source_dir / file_name
-                                logging.info(f"  - 处理文件: {file_path}")
-                                # 模拟处理数据
-                                data_count = 50 + (hash(file_name) % 100)  # 使用文件名的哈希值生成随机数据量
-                                logging.debug(f"  - 详细信息: 已处理数据 {data_count} 条")
-                                time.sleep(0.2)  # 模拟处理时间
-                        logging.info(f"TEMU {option}处理完成")
+                        
+                        option_files = []
+                        patterns = file_type_patterns.get(option, [])
+                        if not isinstance(patterns, list):
+                            patterns = [patterns]
+                            
+                        # 在每个店铺文件夹中查找符合要求的文件
+                        for shop_folder in shop_folders:
+                            for pattern in patterns:
+                                # 强化搜索，扫描所有子目录
+                                for file_path in shop_folder.glob(f"**/{pattern}.xlsx"):
+                                    option_files.append(file_path)
+                                for file_path in shop_folder.glob(f"**/{pattern}.xls"):
+                                    option_files.append(file_path)
+                                for file_path in shop_folder.glob(f"**/{pattern}.csv"):
+                                    option_files.append(file_path)
+                                    
+                        if not option_files:
+                            logging.warning(f"没有找到 {option} 相关的文件")
+                            continue
+                            
+                        logging.info(f"找到 {len(option_files)} 个 {option} 相关文件")
+                        
+                        # 处理每个文件
+                        for file_path in option_files:
+                            relative_path = file_path.relative_to(source_dir)
+                            logging.info(f"  - 处理文件: {relative_path}")
+                            # TODO: 这里将来将调用真实的处理逻辑
+                            #try:
+                            #    # 根据文件类型调用不同的处理方法
+                            #    if option == "订单数据":
+                            #        # 处理订单数据
+                            #    elif option == "对账中心数据":
+                            #        # 处理对账中心数据
+                            #    else:
+                            #        # 处理其他类型数据
+                            #except Exception as e:
+                            #    logging.error(f"  - 处理文件 {relative_path} 失败: {str(e)}")
+                            
+                            # 模拟处理数据数量
+                            data_count = 50 + (hash(str(file_path)) % 100)
+                            logging.debug(f"  - 详细信息: 文件 {file_path.name} 中已处理数据 {data_count} 条")
+                            processed_files += 1
+                            time.sleep(0.1)  # 小延时便于观察
+                            
+                        logging.info(f"TEMU {option} 处理完成")
+                    
+                    logging.info(f"TEMU数据处理完成，共处理了 {processed_files} 个文件")
                         
                     logging.info("TEMU数据处理完成")
                     self.update_progress(90)
