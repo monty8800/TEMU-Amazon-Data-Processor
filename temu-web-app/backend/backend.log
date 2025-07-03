@@ -1,0 +1,22 @@
+INFO:     Started server process [9383]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+ERROR:    [Errno 48] error while attempting to bind on address ('0.0.0.0', 8089): address already in use
+INFO:     Waiting fINFO:     127.0.0.1:65446 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50136 - "POST /upload/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50625 - "POST /upload/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51568 - "POST /upload/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51568 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51588 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51568 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51591 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51588 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51588 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51591 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/logs HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51591 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51591 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/files HTTP/1.1" 200 OK
+INFO:     127.0.0.1:51646 - "GET /tasks/aea9f7cd-748c-4cf7-95f9-093221943a6e/download/process.log HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [9272]

@@ -1,0 +1,11 @@
+MANIFEST.in
+README.md
+setup.py
+temu_amazon_processor/__init__.py
+temu_amazon_processor/main.py
+temu_amazon_processor.egg-info/PKG-INFO
+temu_amazon_processor.egg-info/SOURCES.txt
+temu_amazon_processor.egg-info/dependency_links.txt
+temu_amazon_processor.egg-info/entry_points.txt
+temu_amazon_processor.egg-info/requires.txt
+temu_amazon_processor.egg-info/top_level.txt
