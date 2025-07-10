@@ -135,6 +135,7 @@ class CustomTemuDataProcessor:
             'US': '美国', 
             'JP': '日本', 
             'EU': '欧区', 
+            'EU2': '欧洲', 
             'GLOBAL': '全球', 
         }
         
@@ -178,13 +179,38 @@ class CustomTemuDataProcessor:
                 return self.country_mapping[country_code]
         
         # 如果没有找到任何国家信息，返回默认值
-        return '未知国家'
+        return '-'
 
     def find_files(self, file_type, directory=None):
         """
         查找TEMU_SOURCE_DIR下每个店铺目录内，包含file_type关键字且扩展名为xlsx/xls/csv的文件。
+        对于“海外仓”类型，直接查找 TEMU_SOURCE_DIR/海外仓 目录下的文件。
         返回格式：[{'store': 店铺名, 'country': 国家, 'file': 文件路径}, ...]
+        自动过滤掉以~或.开头的临时文件。
         """
+        def is_valid_file(file):
+            # 过滤掉以~或.开头的文件（如Excel临时文件、隐藏文件）
+            return not (file.name.startswith('~') or file.name.startswith('.'))
+
+        if file_type in ['海外仓', '轶仓', '轶仓海外订单']:  # 可根据实际关键字调整
+            directory = Path(TEMU_SOURCE_DIR) / '海外仓'
+            result = []
+            extensions = ['.xlsx', '.xls', '.csv']
+            for file in directory.iterdir():
+                if (
+                    file.is_file()
+                    and file.suffix.lower() in extensions
+                    and file_type in file.name
+                    and is_valid_file(file)
+                ):
+                    result.append({'store': '', 'country': '', 'file': file})
+            if not result:
+                log_warning(f"在 {directory} 下没有找到包含 '{file_type}' 的海外仓相关文件")
+            else:
+                log_success(f"共找到 {len(result)} 个包含 '{file_type}' 的海外仓相关文件")
+            return result
+
+        # 其它类型按原逻辑
         if directory is None:
             directory = TEMU_SOURCE_DIR
         directory = Path(directory)
@@ -194,7 +220,12 @@ class CustomTemuDataProcessor:
         for store_dir in store_dirs:
             store_name = store_dir.name
             for file in store_dir.iterdir():
-                if file.is_file() and file_type in file.name and file.suffix.lower() in extensions:
+                if (
+                    file.is_file()
+                    and file_type in file.name
+                    and file.suffix.lower() in extensions
+                    and is_valid_file(file)
+                ):
                     country = self._extract_country_from_filename(file)
                     result.append({'store': store_name, 'country': country, 'file': file})
         if not result:
@@ -288,7 +319,7 @@ class CustomTemuDataProcessor:
                     if df.empty:
                         continue
                     df.insert(0, "店铺", store)
-                    df.insert(1, "国家", country)
+                    df.insert(1, "报表国家", country)
                     sheet_data.setdefault(sheet_name, []).append(df)
                     total_rows += len(df)
             except Exception as e:
@@ -328,11 +359,8 @@ class CustomTemuDataProcessor:
             if df.empty:
                 continue
             
-            # 删除同名列
-            df = df.drop(columns=['店铺', '国家'], errors='ignore')
-            
             df.insert(0, "店铺", store)
-            df.insert(1, "国家", country)
+            df.insert(1, "报表国家", country)
             all_data.append(df)
             total_rows += len(df)
         
@@ -352,7 +380,7 @@ class CustomTemuDataProcessor:
             "Waybill Number": "运单号",
             "Service Provider Code": "服务商code",
             "Bill Type": "账单类型",
-            "Shipping Fee (Unit: Yuan)": "运费(单位元)",
+            "Shipping Fee (Unit: Yuan)": "运费",
             "Currency": "币种",
             "Reconciliation Bill Status": "对账单状态",
             "Expense/Refund Time (Time Zone: GMT+8)": "支出/退款时间(时区：GMT+8)"
@@ -376,19 +404,18 @@ class CustomTemuDataProcessor:
             df = self.read_file(file)
             if df.empty:
                 continue
-            # 删除同名列
-            df = df.drop(columns=['店铺', '国家'], errors='ignore')
+            
             # 英文表头转中文
             df.rename(columns=col_map, inplace=True)
             df.insert(0, "店铺", store)
-            df.insert(1, "国家", country)
+            df.insert(1, "报表国家", country)
             all_data.append(df)
             total_rows += len(df)
 
         if all_data:
             merged_df = pd.concat(all_data, ignore_index=True)
             # 再统一一次表头顺序（如需固定顺序可如下指定）
-            col_order = ["店铺", "国家", "包裹号", "运单号", "服务商code", "账单类型", "运费(单位元)", "币种", "对账单状态", "支出/退款时间(时区：GMT+8)"]
+            col_order = ["店铺", "报表国家", "包裹号", "运单号", "服务商code", "账单类型", "运费", "币种", "对账单状态", "支出/退款时间(时区：GMT+8)"]
             merged_df = merged_df[[col for col in col_order if col in merged_df.columns] + [col for col in merged_df.columns if col not in col_order]]
             output_path = self.output_dir / f'TEMU发货面单费-{self.task_id}.xlsx'
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -400,13 +427,13 @@ class CustomTemuDataProcessor:
     def merge_return_label_fee(self):
         """合并所有退货面单费文件到一个表，并增加‘店铺’和‘国家’两列，表头统一为中文"""
         col_map = {
-            "reconciliationId": "账务单ID",
+            "reconciliationId": "对账ID",
             "waybill sn": "运单号",
-            "parent orderSn": "PO单号",
-            "deduct type desc": "账单类型",
-            "seller currency": "币种",
-            "freight charge": "金额",
-            "deduct time": "账单支出/退款时间"
+            "parent orderSn": "父订单号",
+            "deduct type desc": "扣款类型描述",
+            "seller currency": "卖家币种",
+            "freight charge": "运费",
+            "deduct time": "扣款时间"
         }
         label_files = self.find_files("退货面单费")
         log_step("开始处理退货面单费数据")
@@ -427,19 +454,17 @@ class CustomTemuDataProcessor:
             df = self.read_file(file)
             if df.empty:
                 continue
-            # 删除同名列
-            df = df.drop(columns=['店铺', '国家'], errors='ignore')
             # 英文表头转中文
             df.rename(columns=col_map, inplace=True)
             df.insert(0, "店铺", store)
-            df.insert(1, "国家", country)
+            df.insert(1, "报表国家", country)
             all_data.append(df)
             total_rows += len(df)
 
         if all_data:
             merged_df = pd.concat(all_data, ignore_index=True)
             # 统一表头顺序
-            col_order = ["店铺", "国家", "账务单ID", "运单号", "PO单号", "账单类型", "币种", "金额", "账单支出/退款时间"]
+            col_order = ["店铺", "报表国家", "对账ID", "运单号", "父订单号", "扣款类型描述", "卖家币种", "运费", "扣款时间"]
             merged_df = merged_df[[col for col in col_order if col in merged_df.columns] + [col for col in merged_df.columns if col not in col_order]]
             output_path = self.output_dir / f'TEMU退货面单费-{self.task_id}.xlsx'
             with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
@@ -471,10 +496,8 @@ class CustomTemuDataProcessor:
                 df = xl.parse(sheet_name)
                 if df.empty:
                     continue
-                # 删除同名列
-                df = df.drop(columns=['店铺', '国家'], errors='ignore')
                 df.insert(0, "店铺", store)
-                df.insert(1, "国家", country)
+                df.insert(1, "报表国家", country)
                 all_data.append(df)
                 total_rows += len(df)
 
@@ -487,15 +510,248 @@ class CustomTemuDataProcessor:
         else:
             log_warning("没有有效的账务中心-明细数据可处理")
         
+    def merge_yicang_overseas_order(self):
+        """合并所有轶仓海外订单数据到一个sheet"""
+        detail_files = self.find_files("轶仓")
+        log_step("开始处理轶仓海外订单数据")
+        log_success(f"找到 {len(detail_files)} 个轶仓海外订单文件")
+        if not detail_files:
+            log_warning("没有找到轶仓海外订单文件")
+            return
+
+        log_section("开始处理轶仓海外订单数据")
+        all_data = []
+        total_rows = 0
+
+        for item in detail_files:
+            file = item['file']
+            log_step(f"处理 轶仓海外订单文件: {file}")
+            xl = pd.ExcelFile(file)
+          
+            for sheet_name in xl.sheet_names:
+                df = xl.parse(sheet_name, header=3)  # 关键点：表头在第4行
+                # 打印表头，不是sheet_name
+                print(df.columns)
+                if df.empty:
+                    continue
+                all_data.append(df)
+                total_rows += len(df)
+
+        if all_data:
+            merged_df = pd.concat(all_data, ignore_index=True)
+            output_path = self.output_dir / f'轶仓海外仓账单-{self.task_id}.xlsx'
+            # 打印表头
+            print(merged_df.columns)
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                merged_df.to_excel(writer, sheet_name="轶仓海外仓账单", index=False)
+            log_success(f"轶仓海外仓账单数据处理完成，共 {total_rows} 行数据，输出文件: {output_path}")
+        else:
+            log_warning("没有有效的轶仓海外仓账单数据可处理")
+        
+    def merge_changjing_overseas_order(self):
+        """合并所有长鲸海外订单数据到一个sheet"""
+        detail_files = self.find_files("长鲸")
+        log_step("开始处理长鲸海外订单数据")
+        log_success(f"找到 {len(detail_files)} 个长鲸海外订单文件")
+        if not detail_files:
+            log_warning("没有找到长鲸海外订单文件")
+            return
+
+        log_section("开始处理长鲸海外订单数据")
+        all_data = []
+        total_rows = 0
+
+        for item in detail_files:
+            file = item['file']
+            log_step(f"处理 长鲸海外订单文件: {file}")
+            xl = pd.ExcelFile(file)
+          
+            for sheet_name in xl.sheet_names:
+                df = xl.parse(sheet_name)  # 关键点：表头在第4行
+                # 打印表头，不是sheet_name
+                print(df.columns)
+                if df.empty:
+                    continue
+                all_data.append(df)
+                total_rows += len(df)
+
+        if all_data:
+            merged_df = pd.concat(all_data, ignore_index=True)
+            output_path = self.output_dir / f'长鲸海外仓账单-{self.task_id}.xlsx'
+            # 打印表头
+            print(merged_df.columns)
+            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                merged_df.to_excel(writer, sheet_name="长鲸海外仓账单", index=False)
+            log_success(f"长鲸海外仓账单数据处理完成，共 {total_rows} 行数据，输出文件: {output_path}")
+        else:
+            log_warning("没有有效的长鲸海外仓账单数据可处理")
+
+    def merge_koda_overseas_order(self):
+        """将每个KODA海外订单文件的每个sheet单独拆分成文件"""
+        detail_files = self.find_files("KODA")
+        log_step("开始处理KODA海外订单数据")
+        log_success(f"找到 {len(detail_files)} 个KODA海外订单文件")
+        if not detail_files:
+            log_warning("没有找到KODA海外订单文件")
+            return
+
+        log_section("开始拆分KODA海外订单数据")
+        total_sheets = 0
+        total_rows = 0
+
+        for item in detail_files:
+            file = item['file']
+            base_filename = Path(file).stem
+            log_step(f"处理 KODA海外订单文件: {file}")
+            xl = pd.ExcelFile(file)
+            for sheet_name in xl.sheet_names:
+                df = xl.parse(sheet_name)
+                print(df.columns)
+                if df.empty:
+                    continue
+                # 去重逻辑
+                key_cols = ["费用单据号 (No.）", "OMS单据号（OMS No.）", "物流跟踪号（Tacking No.）"]
+                subtotal_col = "出库费用小计（Subtotal）"
+                # 只保留同组中Subtotal有值的行，如果全为空则保留一行
+                if all(col in df.columns for col in key_cols + [subtotal_col]):
+                    # 标记Subtotal为空的行
+                    df["_subtotal_isnull"] = df[subtotal_col].isnull() | (df[subtotal_col] == "")
+                    # 按key分组，优先保留Subtotal有值的行，否则保留首行
+                    df = (
+                        df.sort_values("_subtotal_isnull")
+                        .groupby(key_cols, as_index=False)
+                        .first()
+                    )
+                    df = df.drop(columns=["_subtotal_isnull"])
+                else:
+                    log_warning(f"表 {sheet_name} 缺少关键列，未做去重处理")
+
+                if df.empty:
+                    continue
+                total_rows += len(df)
+                total_sheets += 1
+                # 输出文件名：原文件名-表名-任务id.xlsx
+                safe_sheet_name = re.sub(r'[\\/*?:"<>|]', '_', sheet_name)
+                output_path = self.output_dir / f"KODA海外仓账单-{safe_sheet_name}-{self.task_id}.xlsx"
+                with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+                log_success(f"已输出sheet: {sheet_name} 到文件: {output_path}")
+
+        log_success(f"KODA海外订单sheet拆分完成，共 {total_sheets} 个sheet，总 {total_rows} 行数据")
+    
+    def merge_nanxi_overseas_order(self):
+        """
+        处理南溪海外仓账单文件及订单文件：
+        1. 自动查找文件名包含“南溪账单”的文件，提取订单编号，输出新账单文件。
+        2. 自动查找文件名包含“南溪订单”的文件，将账单中订单编号的“交易金额”写入到订单表中，输出新订单表文件。
+        """
+        import re
+
+        # 查找所有“南溪账单”文件
+        bill_files = self.find_files("南溪账单")
+        if not bill_files:
+            log_warning("未找到包含‘南溪账单’的文件")
+            return
+
+        # 查找所有“南溪订单”文件
+        order_files = self.find_files("南溪订单")
+        if not order_files:
+            log_warning("未找到包含‘南溪订单’的文件")
+            return
+
+        # 只处理第一个订单文件（如有多个可遍历处理）
+        order_item = order_files[0]
+        order_path = Path(order_item['file'])
+
+        for item in bill_files:
+            bill_path = Path(item['file'])
+            output_bill_path = self.output_dir / f"{bill_path.stem}-处理后-{self.task_id}.xlsx"
+
+            # 1. 处理账单文件，生成“订单编号”列
+            try:
+                df_bill = pd.read_excel(bill_path)
+            except Exception as e:
+                log_warning(f"读取账单文件失败: {bill_path}, 错误: {e}")
+                continue
+
+            if "说明" not in df_bill.columns:
+                log_warning(f"账单文件{bill_path}缺少“说明”列，无法提取订单编号")
+                continue
+
+            def extract_order_no(text):
+                if pd.isnull(text):
+                    return ""
+                match = re.search(r"(10385\w*)", str(text))
+                if match:
+                    return match.group(1)
+                return ""
+
+            df_bill["订单编号"] = df_bill["说明"].apply(extract_order_no)
+
+            # 输出新账单文件
+            try:
+                with pd.ExcelWriter(output_bill_path, engine='openpyxl') as writer:
+                    df_bill.to_excel(writer, index=False)
+                log_success(f"南溪账单处理完成，输出文件: {output_bill_path}")
+            except Exception as e:
+                log_warning(f"输出账单新文件失败: {output_bill_path}, 错误: {e}")
+                continue
+
+            # 2. 用新账单文件的“订单编号”补充订单表
+            output_order_path = self.output_dir / f"{order_path.stem}-补充账单金额-{self.task_id}.xlsx"
+            try:
+                df_order = pd.read_excel(order_path)
+            except Exception as e:
+                log_warning(f"读取订单文件失败: {order_path}, 错误: {e}")
+                continue
+
+            # 输出订单表所有列名，便于人工确认
+            log_step(f"订单表实际列名: {list(df_order.columns)}")
+
+            # 尝试找到订单表中的订单号列（模糊匹配）
+            order_no_col = None
+            for col in df_order.columns:
+                if "订单" in col and "号" in col:
+                    order_no_col = col
+                    break
+            if not order_no_col:
+                for col in df_order.columns:
+                    if "order" in col.lower():
+                        order_no_col = col
+                        break
+            if not order_no_col:
+                log_warning(f"订单表{order_path}缺少‘订单编号’相关列，无法补充账单金额。实际列名：{list(df_order.columns)}")
+                continue
+
+            # 账单中订单编号与交易金额的映射（用新账单文件）
+            bill_amount_map = {}
+            if "订单编号" in df_bill.columns and "交易金额" in df_bill.columns:
+                bill_amount_map = df_bill.set_index("订单编号")["交易金额"].to_dict()
+
+            # 写入账单交易金额
+            df_order["账单交易金额"] = df_order[order_no_col].map(bill_amount_map)
+
+            try:
+                with pd.ExcelWriter(output_order_path, engine='openpyxl') as writer:
+                    df_order.to_excel(writer, index=False)
+                log_success(f"南溪订单表补充账单金额完成，输出文件: {output_order_path}")
+            except Exception as e:
+                log_warning(f"输出订单新文件失败: {output_order_path}, 错误: {e}")
+        
+        
     def process_all(self):
         """处理所有TEMU数据"""
         log_section("开始处理所有TEMU数据")
-        self.rename_bill_detail_files()
-        self.merge_bill_data()
-        self.merge_order_data()
-        self.merge_shipping_label_fee()
-        self.merge_return_label_fee()
-        self.merge_finance_detail()
+        # self.rename_bill_detail_files()
+        # self.merge_bill_data()
+        # self.merge_order_data()
+        # self.merge_shipping_label_fee()
+        # self.merge_return_label_fee()
+        # self.merge_finance_detail()
+        # self.merge_yicang_overseas_order()
+        # self.merge_changjing_overseas_order()
+        # self.merge_koda_overseas_order()
+        self.merge_nanxi_overseas_order()
         log_section("TEMU数据处理完成")
 
 # 主处理函数

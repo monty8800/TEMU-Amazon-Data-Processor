@@ -9,7 +9,7 @@ import threading
 import subprocess
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from temu_amazon_processor.main import process_data
+from temu_amazon_processor.main_V2 import process_data
 
 DB_FILE = 'merge_history.db'
 
@@ -175,7 +175,7 @@ class MergeApp:
         result_subdir = os.path.join(dst, f'merge_{task_id}')
         try:
             self.write_log(f'任务{task_id}：开始合并...')
-            process_data(process_amazon=False, process_temu=True)
+            process_data(process_temu=True)
             status = '成功'
             log = 'TEMU合并完成'
             self.write_log(f'任务{task_id}：合并完成。')
